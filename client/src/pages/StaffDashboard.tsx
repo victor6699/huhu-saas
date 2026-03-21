@@ -51,8 +51,15 @@ export default function StaffDashboard() {
   const [newPayForm, setNewPayForm] = useState({ invoiceId: "", clientId: "", amount: "", method: "bank_transfer", notes: "" });
   const [showPayModal, setShowPayModal] = useState(false);
   const [showInvModal, setShowInvModal] = useState(false);
+  const [showClientModal, setShowClientModal] = useState(false);
+  const [newClientForm, setNewClientForm] = useState({ username: "", password: "", orgName: "", contactName: "", contactEmail: "", clientType: "institution" });
+  const [showSubModal, setShowSubModal] = useState(false);
+  const [newSubForm, setNewSubForm] = useState({ clientId: "", planId: "", billingCycle: "monthly", elderCount: "1", amount: "", startDate: "", endDate: "" });
+  const [showStaffModal, setShowStaffModal] = useState(false);
+  const [newStaffForm, setNewStaffForm] = useState({ username: "", password: "", displayName: "", role: "sales", email: "" });
 
   const { data: me } = useQuery<Staff>({ queryKey: ["/api/me"] });
+  const { data: staffList = [] } = useQuery<Staff[]>({ queryKey: ["/api/staff/members"] });
   const { data: stats } = useQuery<Stats>({ queryKey: ["/api/staff/stats"] });
   const { data: clients = [] } = useQuery<Client[]>({ queryKey: ["/api/staff/clients"] });
   const { data: subscriptions = [] } = useQuery<Subscription[]>({ queryKey: ["/api/staff/subscriptions"] });
@@ -80,6 +87,18 @@ export default function StaffDashboard() {
   const createPayMutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", "/api/staff/payments", body),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/payments"] }); queryClient.invalidateQueries({ queryKey: ["/api/staff/invoices"] }); setShowPayModal(false); toast({ title: "付款紀錄已新增，帳單標記為已付款" }); },
+  });
+  const createClientMutation = useMutation({
+    mutationFn: (body: any) => apiRequest("POST", "/api/staff/clients", body),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/clients"] }); setShowClientModal(false); toast({ title: "客戶已新增" }); },
+  });
+  const createSubMutation = useMutation({
+    mutationFn: (body: any) => apiRequest("POST", "/api/staff/subscriptions", body),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/subscriptions"] }); setShowSubModal(false); toast({ title: "訂閱已新增" }); },
+  });
+  const createStaffMutation = useMutation({
+    mutationFn: (body: any) => apiRequest("POST", "/api/staff/members", body),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/members"] }); setShowStaffModal(false); toast({ title: "員工已新增" }); },
   });
   const logout = async () => {
     await apiRequest("POST", "/api/logout");
@@ -176,7 +195,10 @@ export default function StaffDashboard() {
           {/* ── Clients ── */}
           {section === "clients" && (
             <div>
-              <h1 className="text-xl font-bold text-gray-900 mb-6">客戶管理</h1>
+              <div className="flex items-center justify-between mb-6">
+                <h1 className="text-xl font-bold text-gray-900">客戶管理</h1>
+                <button onClick={() => setShowClientModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ 新增客戶</button>
+              </div>
               <div className="bg-white rounded-xl border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
@@ -211,13 +233,63 @@ export default function StaffDashboard() {
                   </tbody>
                 </table>
               </div>
+
+              {/* New Client Modal */}
+              {showClientModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-2xl w-full max-w-md p-6">
+                    <h2 className="text-lg font-bold mb-4">新增客戶</h2>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">類型</label>
+                        <select value={newClientForm.clientType} onChange={e=>setNewClientForm(f=>({...f,clientType:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                          <option value="institution">機構</option>
+                          <option value="social_welfare">社會局/社福</option>
+                          <option value="individual">個人</option>
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">機構名稱</label>
+                          <input value={newClientForm.orgName} onChange={e=>setNewClientForm(f=>({...f,orgName:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">聯絡人</label>
+                          <input value={newClientForm.contactName} onChange={e=>setNewClientForm(f=>({...f,contactName:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">登入帳號</label>
+                          <input value={newClientForm.username} onChange={e=>setNewClientForm(f=>({...f,username:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">登入密碼</label>
+                          <input type="password" value={newClientForm.password} onChange={e=>setNewClientForm(f=>({...f,password:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
+                        <input value={newClientForm.contactEmail} onChange={e=>setNewClientForm(f=>({...f,contactEmail:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-5">
+                      <button onClick={() => createClientMutation.mutate(newClientForm)} disabled={createClientMutation.isPending} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">建立</button>
+                      <button onClick={()=>setShowClientModal(false)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* ── Subscriptions ── */}
           {section === "subscriptions" && (
             <div>
-              <h1 className="text-xl font-bold text-gray-900 mb-6">訂閱管理</h1>
+              <div className="flex items-center justify-between mb-6">
+                <h1 className="text-xl font-bold text-gray-900">訂閱管理</h1>
+                <button onClick={() => setShowSubModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ 新增訂閱</button>
+              </div>
               <div className="bg-white rounded-xl border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
@@ -243,6 +315,60 @@ export default function StaffDashboard() {
                   </tbody>
                 </table>
               </div>
+
+              {/* New Sub Modal */}
+              {showSubModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-2xl w-full max-w-md p-6">
+                    <h2 className="text-lg font-bold mb-4">新增訂閱</h2>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">客戶</label>
+                        <select value={newSubForm.clientId} onChange={e=>setNewSubForm(f=>({...f,clientId:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                          <option value="">選擇客戶</option>
+                          {clients.filter(c=>c.status==="active").map(c=><option key={c.id} value={c.id}>{c.orgName||c.contactName}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">方案</label>
+                        <select value={newSubForm.planId} onChange={e=>setNewSubForm(f=>({...f,planId:e.target.value,amount:plans.find(p=>p.id===Number(e.target.value))?.monthlyPrice.toString()||""}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                          <option value="">選擇方案</option>
+                          {plans.map(p=><option key={p.id} value={p.id}>{p.name} (NT${p.monthlyPrice}/月)</option>)}
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">計費週期</label>
+                          <select value={newSubForm.billingCycle} onChange={e=>setNewSubForm(f=>({...f,billingCycle:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                            <option value="monthly">月繳 / 首月</option>
+                            <option value="annual">年繳</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">總金額 (NT$)</label>
+                          <input type="number" value={newSubForm.amount} onChange={e=>setNewSubForm(f=>({...f,amount:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">開始日期</label>
+                          <input type="date" value={newSubForm.startDate} onChange={e=>setNewSubForm(f=>({...f,startDate:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">結束日期</label>
+                          <input type="date" value={newSubForm.endDate} onChange={e=>setNewSubForm(f=>({...f,endDate:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-5">
+                      <button onClick={() => {
+                        createSubMutation.mutate({ ...newSubForm, clientId: Number(newSubForm.clientId), planId: Number(newSubForm.planId), amount: Number(newSubForm.amount), elderCount: Number(newSubForm.elderCount), nextBillingDate: newSubForm.endDate, status: "active" });
+                      }} disabled={createSubMutation.isPending} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">建立</button>
+                      <button onClick={()=>setShowSubModal(false)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -469,7 +595,10 @@ export default function StaffDashboard() {
           {/* ── Staff ── */}
           {section === "staff" && (
             <div>
-              <h1 className="text-xl font-bold text-gray-900 mb-6">員工管理</h1>
+              <div className="flex items-center justify-between mb-6">
+                <h1 className="text-xl font-bold text-gray-900">員工管理</h1>
+                <button onClick={() => setShowStaffModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ 新增員工</button>
+              </div>
               <div className="bg-white rounded-xl border overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
@@ -480,11 +609,7 @@ export default function StaffDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {[
-                      { id:1, displayName:"系統管理員", username:"admin", role:"superadmin", email:"admin@huhu.ai", isActive:true },
-                      { id:2, displayName:"陳業務", username:"sales_chen", role:"sales", email:"sales@huhu.ai", isActive:true },
-                      { id:3, displayName:"林財務", username:"finance_lin", role:"finance", email:"finance@huhu.ai", isActive:true },
-                    ].map(s=>(
+                    {staffList.map(s=>(
                       <tr key={s.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-medium text-gray-900">{s.displayName}</td>
                         <td className="px-4 py-3 font-mono text-xs text-gray-600">{s.username}</td>
@@ -496,6 +621,50 @@ export default function StaffDashboard() {
                   </tbody>
                 </table>
               </div>
+
+              {/* New Staff Modal */}
+              {showStaffModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-2xl w-full max-w-md p-6">
+                    <h2 className="text-lg font-bold mb-4">新增員工</h2>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">姓名</label>
+                          <input value={newStaffForm.displayName} onChange={e=>setNewStaffForm(f=>({...f,displayName:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">角色</label>
+                          <select value={newStaffForm.role} onChange={e=>setNewStaffForm(f=>({...f,role:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                            <option value="superadmin">超級管理員</option>
+                            <option value="sales">業務</option>
+                            <option value="finance">財務</option>
+                            <option value="support">客服</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">登入帳號</label>
+                          <input value={newStaffForm.username} onChange={e=>setNewStaffForm(f=>({...f,username:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">登入密碼</label>
+                          <input type="password" value={newStaffForm.password} onChange={e=>setNewStaffForm(f=>({...f,password:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
+                        <input value={newStaffForm.email} onChange={e=>setNewStaffForm(f=>({...f,email:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-5">
+                      <button onClick={() => createStaffMutation.mutate(newStaffForm)} disabled={createStaffMutation.isPending} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">建立</button>
+                      <button onClick={()=>setShowStaffModal(false)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
