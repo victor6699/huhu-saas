@@ -15,7 +15,7 @@ const STATUS_BADGE: Record<string, string> = {
   paid: "bg-green-100 text-green-800", unpaid: "bg-yellow-100 text-yellow-800",
   overdue: "bg-red-100 text-red-800",
 };
-const STATUS_ZH: Record<string, string> = { active: "?銝?, pending: "敺祟??, paid: "撌脖?甈?, unpaid: "敺?甈?, overdue: "?暹?" };
+const STATUS_ZH: Record<string, string> = { active: "生效中", pending: "處理中", paid: "已付款", unpaid: "未付款", overdue: "已逾期" };
 
 function Badge({ status }: { status: string }) {
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_BADGE[status] ?? "bg-gray-100 text-gray-600"}`}>{STATUS_ZH[status] ?? status}</span>;
@@ -48,12 +48,12 @@ export default function ClientPortal() {
     setPayLoading(true);
     try {
       const data = await apiRequest("POST", "/api/portal/pay", { invoiceId: payModal.id, method: payMethod });
-      toast({ title: "隞狡??", description: `鈭斗?蝺刻?嚗?{data.transactionId}` });
+      toast({ title: "付款成功", description: `交易編號：${data.transactionId}` });
       queryClient.invalidateQueries({ queryKey: ["/api/portal/invoices"] });
       setPayModal(null);
     } catch (e: any) {
-      const msg = await e?.response?.json().catch(() => ({ message: "隞狡憭望?" }));
-      toast({ title: "隞狡憭望?", description: msg?.message, variant: "destructive" });
+      const msg = await e?.response?.json().catch(() => ({ message: "付款失敗" }));
+      toast({ title: "付款失敗", description: msg?.message, variant: "destructive" });
     } finally { setPayLoading(false); }
   }
 
@@ -62,42 +62,46 @@ export default function ClientPortal() {
   const activeSub = subscriptions.find(s => s.status === "active");
 
   const navItems = [
-    { key: "overview", label: "蝮質汗", icon: "??" },
-    { key: "invoices", label: "撣喳?亥岷", icon: "?屁", badge: unpaidCount > 0 ? unpaidCount : undefined },
-    { key: "subscriptions", label: "??閮", icon: "??" },
-    { key: "plans", label: "?寞?隞晶", icon: "?? },
-    { key: "service", label: "雿輻蝝??, icon: "??" },
+    { key: "overview",       label: "總覽",     icon: "🏠" },
+    { key: "invoices",       label: "發票管理", icon: "📄", badge: unpaidCount > 0 ? unpaidCount : undefined },
+    { key: "subscriptions",  label: "訂閱",     icon: "📋" },
+    { key: "plans",          label: "方案選購", icon: "💡" },
+    { key: "service",        label: "服務記錄", icon: "📊" },
   ] as const;
 
-  const clientLabel = me ? (me.orgName || me.contactName) : "頛銝?..";
-  const typeZH: Record<string, string> = { institution: "璈?", social_welfare: "蝷暹?撅/蝷曄?", individual: "?犖" };
+  const clientLabel = me ? (me.orgName || me.contactName) : "載入中...";
+  const typeZH: Record<string, string> = { institution: "機構", social_welfare: "社會局/社福", individual: "個人" };
 
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Sidebar */}
-      <aside className="w-56 bg-teal-900 text-white flex flex-col shrink-0">
-        <div className="p-4 border-b border-teal-700">
+      <aside className="w-56 bg-[#0d3d3d] text-white flex flex-col shrink-0">
+        <div className="p-4 border-b border-[#0ABAB5]/30">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-teal-400 rounded-lg flex items-center justify-center text-sm font-bold">H</div>
+            <img src="/huhu-logo.png" alt="HuHu" className="w-8 h-8 object-contain rounded-lg" onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }} />
             <div>
               <p className="text-sm font-bold text-white">HuHu AI</p>
-              <p className="text-xs text-teal-200">摰Ｘ??撟喳</p>
+              <p className="text-xs text-[#7DDDD9]">客戶後台</p>
             </div>
           </div>
         </div>
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {navItems.map(item => (
             <button key={item.key} onClick={() => setSection(item.key)}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between transition-colors ${section === item.key ? "bg-teal-600 text-white" : "text-teal-100 hover:bg-teal-800 hover:text-white"}`}>
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between transition-colors ${
+                section === item.key ? "bg-[#0ABAB5] text-white" : "text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white"
+              }`}>
               <span className="flex items-center gap-2"><span>{item.icon}</span>{item.label}</span>
               {(item as any).badge && <span className="bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">{(item as any).badge}</span>}
             </button>
           ))}
         </nav>
-        <div className="p-3 border-t border-teal-700">
-          <div className="text-xs text-teal-200 mb-2 px-1 truncate">{clientLabel}</div>
-          {me && <div className="text-xs text-teal-300 mb-2 px-1">{typeZH[me.clientType] ?? me.clientType} 繚 <Badge status={me.status} /></div>}
-          <button onClick={logout} className="w-full text-left px-3 py-2 rounded-lg text-sm text-teal-200 hover:bg-teal-800 hover:text-white transition-colors">? ?餃</button>
+        <div className="p-3 border-t border-[#0ABAB5]/30">
+          <div className="text-xs text-[#7DDDD9] mb-2 px-1 truncate">{clientLabel}</div>
+          {me && <div className="text-xs text-[#A0E7E4] mb-2 px-1">{typeZH[me.clientType] ?? me.clientType} · <Badge status={me.status} /></div>}
+          <button onClick={logout} className="w-full text-left px-3 py-2 rounded-lg text-sm text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white transition-colors">🚪 登出</button>
         </div>
       </aside>
 
@@ -105,61 +109,60 @@ export default function ClientPortal() {
       <main className="flex-1 overflow-y-auto">
         <div className="p-6">
 
-          {/* ?? Overview ?? */}
+          {/* 總覽 */}
           {section === "overview" && (
             <div>
-              <h1 className="text-xl font-bold text-gray-900 mb-2">?典末嚗me?.contactName} ??</h1>
+              <h1 className="text-xl font-bold text-gray-900 mb-2">您好，{me?.contactName} 👋</h1>
               <p className="text-sm text-gray-500 mb-6">{clientLabel}</p>
 
-              {/* Status banners */}
               {me?.status === "pending" && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 flex items-start gap-3">
-                  <span className="text-2xl">??/span>
+                  <span className="text-2xl">⏳</span>
                   <div>
-                    <p className="font-semibold text-amber-800">撣唾?撖拇銝?/p>
-                    <p className="text-sm text-amber-700 mt-1">?函?撣唾?甇?撖拇嚗虜1?極雿?批??????喳??雿輻??????????舐窗摰Ｘ?嚗ervice@huhu.ai</p>
+                    <p className="font-semibold text-amber-800">帳號審核中</p>
+                    <p className="text-sm text-amber-700 mt-1">我們已收到您的申請，預計 1 個工作天內完成審核，審核完成後會通知您的聯絡信箱。如有疑問請聯絡 service@huhu.ai</p>
                   </div>
                 </div>
               )}
 
               {unpaidCount > 0 && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 flex items-start gap-3 cursor-pointer hover:bg-red-100" onClick={() => setSection("invoices")}>
-                  <span className="text-2xl">??</span>
+                  <span className="text-2xl">⚠️</span>
                   <div>
-                    <p className="font-semibold text-red-800">?冽? {unpaidCount} 撘萄?隞狡撣喳</p>
-                    <p className="text-sm text-red-700 mt-1">?芯?????嚗T$ {fmt(unpaidAmt)}嚗?暺迨??隞狡</p>
+                    <p className="font-semibold text-red-800">您有 {unpaidCount} 筆待付款發票</p>
+                    <p className="text-sm text-red-700 mt-1">合計 NT$ {fmt(unpaidAmt)}，請點此前往付款</p>
                   </div>
                 </div>
               )}
 
-              {/* Summary cards */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
                 <div className="bg-white rounded-xl border p-4">
-                  <p className="text-xs text-gray-500">?桀??寞?</p>
-                  <p className="text-lg font-bold text-teal-700 mt-1">{activeSub ? (plans.find(p=>p.id===activeSub.planId)?.name ?? "?寞?頛銝?) : "撠閮"}</p>
-                  {activeSub && <p className="text-xs text-gray-400 mt-1">{activeSub.billingCycle==="annual"?"撟渡像":"?像"} 繚 ?唳? {activeSub.endDate}</p>}
+                  <p className="text-xs text-gray-500">目前方案</p>
+                  <p className="text-lg font-bold text-[#0ABAB5] mt-1">{activeSub ? (plans.find(p => p.id === activeSub.planId)?.name ?? "載入中") : "未訂閱"}</p>
+                  {activeSub && <p className="text-xs text-gray-400 mt-1">{activeSub.billingCycle === "annual" ? "年繳" : "月繳"} · 有效至 {activeSub.endDate}</p>}
                 </div>
                 <div className="bg-white rounded-xl border p-4">
-                  <p className="text-xs text-gray-500">???瑁憬??/p>
-                  <p className="text-lg font-bold text-blue-700 mt-1">{activeSub?.elderCount ?? 0} 雿?/p>
+                  <p className="text-xs text-gray-500">使用中長輩數</p>
+                  <p className="text-lg font-bold text-blue-700 mt-1">{activeSub?.elderCount ?? 0} 人</p>
                 </div>
                 <div className="bg-white rounded-xl border p-4">
-                  <p className="text-xs text-gray-500">撣喳???/p>
-                  <p className={`text-lg font-bold mt-1 ${unpaidCount > 0 ? "text-red-600" : "text-green-600"}`}>{unpaidCount > 0 ? `${unpaidCount} 撘萄?蝜訢 : "?券隞?"}</p>
+                  <p className="text-xs text-gray-500">待付發票</p>
+                  <p className={`text-lg font-bold mt-1 ${unpaidCount > 0 ? "text-red-600" : "text-green-600"}`}>
+                    {unpaidCount > 0 ? `${unpaidCount} 筆待付款` : "全部清償"}
+                  </p>
                 </div>
               </div>
 
-              {/* Recent invoices */}
               <div className="bg-white rounded-xl border">
                 <div className="p-4 border-b flex items-center justify-between">
-                  <h2 className="font-semibold text-gray-800">?餈董??/h2>
-                  <button onClick={() => setSection("invoices")} className="text-sm text-teal-600 hover:underline">?亦??券</button>
+                  <h2 className="font-semibold text-gray-800">最新發票</h2>
+                  <button onClick={() => setSection("invoices")} className="text-sm text-[#0ABAB5] hover:underline">查看全部</button>
                 </div>
                 {invoices.length === 0 ? (
-                  <div className="p-8 text-center text-gray-400 text-sm">撠撣喳蝝??/div>
+                  <div className="p-8 text-center text-gray-400 text-sm">尚無發票資料</div>
                 ) : (
                   <div className="divide-y">
-                    {[...invoices].sort((a,b)=>b.id-a.id).slice(0,4).map(inv => (
+                    {[...invoices].sort((a, b) => b.id - a.id).slice(0, 4).map(inv => (
                       <div key={inv.id} className="px-4 py-3 flex items-center justify-between">
                         <div>
                           <p className="text-sm font-medium text-gray-900">{inv.invoiceNo}</p>
@@ -171,7 +174,7 @@ export default function ClientPortal() {
                             <Badge status={inv.status} />
                           </div>
                           {(inv.status === "unpaid" || inv.status === "overdue") && (
-                            <button onClick={() => setPayModal(inv)} className="px-3 py-1.5 bg-teal-600 text-white text-xs rounded-lg hover:bg-teal-700 font-medium">蝡隞狡</button>
+                            <button onClick={() => setPayModal(inv)} className="px-3 py-1.5 bg-[#0ABAB5] text-white text-xs rounded-lg hover:bg-[#089490] font-medium">立即付款</button>
                           )}
                         </div>
                       </div>
@@ -182,30 +185,30 @@ export default function ClientPortal() {
             </div>
           )}
 
-          {/* ?? Invoices ?? */}
+          {/* 發票管理 */}
           {section === "invoices" && (
             <div>
-              <h1 className="text-xl font-bold text-gray-900 mb-6">撣喳?亥岷</h1>
+              <h1 className="text-xl font-bold text-gray-900 mb-6">發票管理</h1>
               {invoices.length === 0 ? (
-                <div className="bg-white rounded-xl border p-12 text-center text-gray-400">撠撣喳蝝??/div>
+                <div className="bg-white rounded-xl border p-12 text-center text-gray-400">尚無發票資料</div>
               ) : (
                 <div className="space-y-3">
-                  {[...invoices].sort((a,b)=>b.id-a.id).map(inv => (
+                  {[...invoices].sort((a, b) => b.id - a.id).map(inv => (
                     <div key={inv.id} className="bg-white rounded-xl border p-5">
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="font-mono text-sm font-bold text-blue-700">{inv.invoiceNo}</p>
-                          <p className="text-sm text-gray-600 mt-1">????嚗inv.periodStart} ~ {inv.periodEnd}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">?潛巨?伐?{inv.issueDate} 繚 隞狡?芣迫嚗inv.dueDate}</p>
-                          {inv.notes && <p className="text-xs text-gray-400 mt-0.5">?酉嚗inv.notes}</p>}
+                          <p className="text-sm text-gray-600 mt-1">計費期間：{inv.periodStart} ~ {inv.periodEnd}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">開立日期：{inv.issueDate} · 付款期限：{inv.dueDate}</p>
+                          {inv.notes && <p className="text-xs text-gray-400 mt-0.5">備註：{inv.notes}</p>}
                         </div>
                         <div className="text-right">
                           <Badge status={inv.status} />
-                          <p className="text-xs text-gray-400 mt-1">撠? NT$ {fmt(inv.subtotal)}</p>
-                          <p className="text-xs text-gray-400">蝔? NT$ {fmt(inv.tax)}</p>
-                          <p className="text-lg font-bold text-gray-900 mt-1">?? NT$ {fmt(inv.total)}</p>
+                          <p className="text-xs text-gray-400 mt-1">稅前 NT$ {fmt(inv.subtotal)}</p>
+                          <p className="text-xs text-gray-400">稅額 NT$ {fmt(inv.tax)}</p>
+                          <p className="text-lg font-bold text-gray-900 mt-1">合計 NT$ {fmt(inv.total)}</p>
                           {(inv.status === "unpaid" || inv.status === "overdue") && (
-                            <button onClick={() => setPayModal(inv)} className="mt-2 px-4 py-1.5 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700 font-medium">蝡隞狡</button>
+                            <button onClick={() => setPayModal(inv)} className="mt-2 px-4 py-1.5 bg-[#0ABAB5] text-white text-sm rounded-lg hover:bg-[#089490] font-medium">立即付款</button>
                           )}
                         </div>
                       </div>
@@ -216,14 +219,14 @@ export default function ClientPortal() {
             </div>
           )}
 
-          {/* ?? Subscriptions ?? */}
+          {/* 訂閱 */}
           {section === "subscriptions" && (
             <div>
-              <h1 className="text-xl font-bold text-gray-900 mb-6">??閮</h1>
+              <h1 className="text-xl font-bold text-gray-900 mb-6">訂閱</h1>
               {subscriptions.length === 0 ? (
                 <div className="bg-white rounded-xl border p-12 text-center">
-                  <p className="text-gray-400 mb-4">撠閮隞颱??寞?</p>
-                  <button onClick={() => setSection("plans")} className="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm">?亦??寞?</button>
+                  <p className="text-gray-400 mb-4">尚無訂閱方案</p>
+                  <button onClick={() => setSection("plans")} className="px-4 py-2 bg-[#0ABAB5] text-white rounded-lg text-sm">查看方案</button>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -234,8 +237,8 @@ export default function ClientPortal() {
                       <div key={s.id} className="bg-white rounded-xl border p-5">
                         <div className="flex items-start justify-between mb-3">
                           <div>
-                            <p className="font-bold text-gray-900 text-lg">{plan?.name ?? "?寞?頛銝?}</p>
-                            <p className="text-sm text-gray-500">{s.billingCycle === "annual" ? "撟渡像?寞?" : "?像?寞?"} 繚 {s.elderCount} 雿頛?/p>
+                            <p className="font-bold text-gray-900 text-lg">{plan?.name ?? "載入中"}</p>
+                            <p className="text-sm text-gray-500">{s.billingCycle === "annual" ? "年繳訂閱" : "月繳訂閱"} · {s.elderCount} 人方案</p>
                           </div>
                           <div className="text-right">
                             <Badge status={s.status} />
@@ -243,13 +246,13 @@ export default function ClientPortal() {
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 mb-3">
-                          <div>???交?嚗s.startDate}</div>
-                          <div>?唳??交?嚗s.endDate}</div>
-                          <div>銝活閮祥嚗s.nextBillingDate}</div>
+                          <div>起始日：{s.startDate}</div>
+                          <div>到期日：{s.endDate}</div>
+                          <div>下次扣款：{s.nextBillingDate}</div>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {features.map((f, i) => (
-                            <span key={i} className="px-2 py-0.5 bg-teal-50 text-teal-700 rounded text-xs">??{f}</span>
+                            <span key={i} className="px-2 py-0.5 bg-[#E0F8F7] text-[#0ABAB5] rounded text-xs">✓ {f}</span>
                           ))}
                         </div>
                       </div>
@@ -260,40 +263,40 @@ export default function ClientPortal() {
             </div>
           )}
 
-          {/* ?? Plans ?? */}
+          {/* 方案選購 */}
           {section === "plans" && (
             <div>
-              <h1 className="text-xl font-bold text-gray-900 mb-2">???寞?</h1>
-              <p className="text-sm text-gray-500 mb-6">憒?????獢?隢蝯⊥平??sales@huhu.ai</p>
+              <h1 className="text-xl font-bold text-gray-900 mb-2">可選方案</h1>
+              <p className="text-sm text-gray-500 mb-6">如需升級或客製化請聯繫 sales@huhu.ai</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {plans.map((plan, idx) => {
                   const features: string[] = JSON.parse(plan.features);
                   const isActive = subscriptions.some(s => s.planId === plan.id && s.status === "active");
-                  const colors = ["border-blue-200 bg-blue-50", "border-teal-200 bg-teal-50", "border-indigo-200 bg-indigo-50", "border-purple-200 bg-purple-50"];
-                  const textColors = ["text-blue-700", "text-teal-700", "text-indigo-700", "text-purple-700"];
+                  const colors = ["border-[#A0E7E4] bg-[#E0F8F7]", "border-[#7DDDD9] bg-[#F0FEFE]", "border-indigo-200 bg-indigo-50", "border-purple-200 bg-purple-50"];
+                  const textColors = ["text-[#0ABAB5]", "text-[#089490]", "text-indigo-700", "text-purple-700"];
                   return (
-                    <div key={plan.id} className={`rounded-xl border-2 ${colors[idx]} p-5 relative`}>
-                      {isActive && <span className="absolute top-3 right-3 bg-green-500 text-white text-xs px-2 py-0.5 rounded-full font-medium">?桀?雿輻銝?/span>}
-                      <p className={`text-lg font-bold ${textColors[idx]}`}>{plan.name}</p>
+                    <div key={plan.id} className={`rounded-xl border-2 ${colors[idx % 4]} p-5 relative`}>
+                      {isActive && <span className="absolute top-3 right-3 bg-green-500 text-white text-xs px-2 py-0.5 rounded-full font-medium">目前使用中</span>}
+                      <p className={`text-lg font-bold ${textColors[idx % 4]}`}>{plan.name}</p>
                       <p className="text-sm text-gray-600 mt-1 mb-3">{plan.description}</p>
                       <div className="flex gap-4 mb-3">
                         <div>
-                          <p className="text-xs text-gray-400">?像</p>
+                          <p className="text-xs text-gray-400">月繳</p>
                           <p className="font-bold text-gray-900">NT$ {fmt(plan.monthlyPrice)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-400">撟渡像嚗?2??嚗?/p>
+                          <p className="text-xs text-gray-400">年繳（×12個月）</p>
                           <p className="font-bold text-gray-900">NT$ {fmt(plan.annualPrice)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-400">?憭頛拇</p>
-                          <p className="font-bold text-gray-900">{plan.maxElders === 999 ? "?∩??? : `${plan.maxElders} 雿}</p>
+                          <p className="text-xs text-gray-400">最多長輩數</p>
+                          <p className="font-bold text-gray-900">{plan.maxElders === 999 ? "無限制" : `${plan.maxElders} 人`}</p>
                         </div>
                       </div>
                       <div className="space-y-1">
                         {features.map((f, i) => (
                           <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
-                            <span className="text-green-500">??/span>{f}
+                            <span className="text-green-500">✓</span>{f}
                           </div>
                         ))}
                       </div>
@@ -304,30 +307,30 @@ export default function ClientPortal() {
             </div>
           )}
 
-          {/* ?? Service Records ?? */}
+          {/* 服務記錄 */}
           {section === "service" && (
             <div>
-              <h1 className="text-xl font-bold text-gray-900 mb-6">??雿輻蝝??/h1>
+              <h1 className="text-xl font-bold text-gray-900 mb-6">月服務記錄</h1>
               {serviceRecords.length === 0 ? (
-                <div className="bg-white rounded-xl border p-12 text-center text-gray-400">撠雿輻蝝??/div>
+                <div className="bg-white rounded-xl border p-12 text-center text-gray-400">尚無服務記錄</div>
               ) : (
                 <div className="bg-white rounded-xl border overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
                       <tr>
-                        {["?遢","???瑁憬??,"撠店甈⊥","霅血??,"瘣餉??瑁憬"].map(h=>(
+                        {["月份", "使用中長輩數", "對話次數", "警報次數", "活躍長輩"].map(h => (
                           <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {[...serviceRecords].sort((a,b)=>b.month.localeCompare(a.month)).map(r=>(
+                      {[...serviceRecords].sort((a, b) => b.month.localeCompare(a.month)).map(r => (
                         <tr key={r.id} className="hover:bg-gray-50">
                           <td className="px-4 py-3 font-medium text-gray-900">{r.month}</td>
-                          <td className="px-4 py-3">{r.elderCount} 雿?/td>
+                          <td className="px-4 py-3">{r.elderCount} 人</td>
                           <td className="px-4 py-3">{r.conversationCount.toLocaleString()}</td>
                           <td className="px-4 py-3">{r.alertCount}</td>
-                          <td className="px-4 py-3">{r.activeElders} 雿?/td>
+                          <td className="px-4 py-3">{r.activeElders} 人</td>
                         </tr>
                       ))}
                     </tbody>
@@ -344,27 +347,25 @@ export default function ClientPortal() {
       {payModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md p-6">
-            <h2 className="text-lg font-bold mb-1">蝺?隞狡</h2>
-            <p className="text-sm text-gray-500 mb-4">撣喳嚗payModal.invoiceNo}</p>
-            {/* Invoice summary */}
+            <h2 className="text-lg font-bold mb-1">確認付款</h2>
+            <p className="text-sm text-gray-500 mb-4">發票：{payModal.invoiceNo}</p>
             <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-1 text-sm">
-              <div className="flex justify-between"><span className="text-gray-500">????</span><span>{payModal.periodStart} ~ {payModal.periodEnd}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">撠?</span><span>NT$ {fmt(payModal.subtotal)}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">蝔?</span><span>NT$ {fmt(payModal.tax)}</span></div>
-              <div className="flex justify-between font-bold border-t pt-2 mt-2"><span>??</span><span className="text-teal-700 text-lg">NT$ {fmt(payModal.total)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">計費期間</span><span>{payModal.periodStart} ~ {payModal.periodEnd}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">稅前</span><span>NT$ {fmt(payModal.subtotal)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">稅額</span><span>NT$ {fmt(payModal.tax)}</span></div>
+              <div className="flex justify-between font-bold border-t pt-2 mt-2"><span>合計</span><span className="text-[#0ABAB5] text-lg">NT$ {fmt(payModal.total)}</span></div>
             </div>
-            {/* Payment method */}
             <div className="mb-5">
-              <p className="text-sm font-medium text-gray-700 mb-2">?豢?隞狡?孵?</p>
+              <p className="text-sm font-medium text-gray-700 mb-2">請選擇付款方式</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { id: "ecpay", label: "蝬?蝘?", sub: "靽∠??ATM", icon: "?" },
-                  { id: "newebpay", label: "???", sub: "靽∠??銵??臭?", icon: "?" },
-                  { id: "stripe", label: "Stripe", sub: "??靽∠??, icon: "?" },
-                  { id: "bank_transfer", label: "?銵甈?, sub: "隡平?舀狡", icon: "?" },
+                  { id: "ecpay",         label: "綠界科技",   sub: "支援信用卡/ATM",    icon: "💳" },
+                  { id: "newebpay",      label: "藍新金流",   sub: "支援信用卡/電子錢包", icon: "🔵" },
+                  { id: "stripe",        label: "Stripe",     sub: "國際信用卡",        icon: "💎" },
+                  { id: "bank_transfer", label: "銀行轉帳",   sub: "手動確認付款",       icon: "🏦" },
                 ].map(m => (
                   <button key={m.id} onClick={() => setPayMethod(m.id)}
-                    className={`p-3 rounded-xl border-2 text-left transition-all ${payMethod === m.id ? "border-teal-500 bg-teal-50" : "border-gray-200 hover:border-gray-300"}`}>
+                    className={`p-3 rounded-xl border-2 text-left transition-all ${payMethod === m.id ? "border-[#0ABAB5] bg-[#E0F8F7]" : "border-gray-200 hover:border-gray-300"}`}>
                     <p className="text-base">{m.icon}</p>
                     <p className="text-sm font-medium text-gray-800">{m.label}</p>
                     <p className="text-xs text-gray-400">{m.sub}</p>
@@ -373,26 +374,25 @@ export default function ClientPortal() {
               </div>
               {payMethod === "bank_transfer" && (
                 <div className="mt-3 bg-blue-50 rounded-lg p-3 text-xs text-blue-700">
-                  <p className="font-medium mb-1">?舀狡鞈?嚗?/p>
-                  <p>?銵??陸銝嚗?13嚗?/p>
-                  <p>撣唾?嚗?234-567-890123</p>
-                  <p>?嗅?嚗汙蝳暹?質隞賣????/p>
-                  <p className="mt-1 text-blue-500">?舀狡敺??芸??摰Ｘ?嚗?????蝣箄?</p>
+                  <p className="font-medium mb-1">轉帳資訊：</p>
+                  <p>銀行代碼：013</p>
+                  <p>帳號：234-567-890123</p>
+                  <p>戶名：呼呼智慧照護有限公司</p>
+                  <p className="mt-1 text-blue-500">轉帳後請通知客服確認，約 1-2 個工作天</p>
                 </div>
               )}
             </div>
             <div className="flex gap-2">
               <button onClick={handlePay} disabled={payLoading || payMethod === "bank_transfer"}
-                className="flex-1 bg-teal-600 text-white py-2.5 rounded-xl font-semibold hover:bg-teal-700 disabled:opacity-50 text-sm">
-                {payLoading ? "??銝?.." : payMethod === "bank_transfer" ? "隢?銝鞈??舀狡" : `蝣箄?隞狡 NT$ ${fmt(payModal.total)}`}
+                className="flex-1 bg-[#0ABAB5] text-white py-2.5 rounded-xl font-semibold hover:bg-[#089490] disabled:opacity-50 text-sm">
+                {payLoading ? "處理中..." : payMethod === "bank_transfer" ? "等待手動確認付款" : `確認付款 NT$ ${fmt(payModal.total)}`}
               </button>
-              <button onClick={() => setPayModal(null)} className="flex-1 border py-2.5 rounded-xl text-sm">??</button>
+              <button onClick={() => setPayModal(null)} className="flex-1 border py-2.5 rounded-xl text-sm">取消</button>
             </div>
-            <p className="text-xs text-gray-400 text-center mt-3">甇斤璅⊥隞狡?啣?嚗??祕?甈?/p>
+            <p className="text-xs text-gray-400 text-center mt-3">此操作受到安全加密保護</p>
           </div>
         </div>
       )}
     </div>
   );
 }
-
