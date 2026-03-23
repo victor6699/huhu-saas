@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-type Staff = { id: number; displayName: string; role: string; username: string };
+type Staff = { id: number; displayName: string; role: string; username: string; email: string; isActive: boolean };
 type Client = { id: number; clientType: string; orgName: string | null; contactName: string; contactEmail: string; contactPhone: string | null; taxId: string | null; status: string; notes: string | null; assignedTo: number | null; createdAt: string; activatedAt: string | null };
 type Plan = { id: number; name: string; monthlyPrice: number; annualPrice: number; maxElders: number; features: string };
 type Subscription = { id: number; clientId: number; planId: number; billingCycle: string; status: string; elderCount: number; startDate: string; endDate: string; nextBillingDate: string; amount: number };
@@ -12,6 +12,26 @@ type Invoice = { id: number; invoiceNo: string; clientId: number; issueDate: str
 type Payment = { id: number; invoiceId: number; clientId: number; amount: number; method: string; status: string; transactionId: string | null; paidAt: string | null; notes: string | null };
 type ServiceRecord = { id: number; clientId: number; month: string; elderCount: number; conversationCount: number; alertCount: number; activeElders: number };
 type Stats = { activeClients: number; pendingClients: number; activeSubscriptions: number; unpaidInvoices: number; unpaidAmount: number; paidAmount: number; mrr: number };
+
+const INITIAL_CLIENT_FORM = {
+  username: "",
+  password: "",
+  orgName: "",
+  contactName: "",
+  contactEmail: "",
+  contactPhone: "",
+  taxId: "",
+  address: "",
+  clientType: "institution",
+};
+
+const INITIAL_STAFF_FORM = {
+  username: "",
+  password: "",
+  displayName: "",
+  role: "sales",
+  email: "",
+};
 
 const TYPE_LABEL: Record<string, string> = { institution: "機構", social_welfare: "社會局/社福", individual: "個人" };
 const STATUS_BADGE: Record<string, string> = {
@@ -52,11 +72,11 @@ export default function StaffDashboard() {
   const [showPayModal, setShowPayModal] = useState(false);
   const [showInvModal, setShowInvModal] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
-  const [newClientForm, setNewClientForm] = useState({ username: "", password: "", orgName: "", contactName: "", contactEmail: "", clientType: "institution" });
+  const [newClientForm, setNewClientForm] = useState(INITIAL_CLIENT_FORM);
   const [showSubModal, setShowSubModal] = useState(false);
   const [newSubForm, setNewSubForm] = useState({ clientId: "", planId: "", billingCycle: "monthly", elderCount: "1", amount: "", startDate: "", endDate: "" });
   const [showStaffModal, setShowStaffModal] = useState(false);
-  const [newStaffForm, setNewStaffForm] = useState({ username: "", password: "", displayName: "", role: "sales", email: "" });
+  const [newStaffForm, setNewStaffForm] = useState(INITIAL_STAFF_FORM);
 
   const { data: me } = useQuery<Staff>({ queryKey: ["/api/me"] });
   const { data: staffList = [] } = useQuery<Staff[]>({ queryKey: ["/api/staff/members"] });
@@ -90,7 +110,16 @@ export default function StaffDashboard() {
   });
   const createClientMutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", "/api/staff/clients", body),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/clients"] }); setShowClientModal(false); toast({ title: "客戶已新增" }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/staff/clients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/staff/stats"] });
+      setNewClientForm(INITIAL_CLIENT_FORM);
+      setShowClientModal(false);
+      toast({ title: "客戶已新增" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "新增失敗", description: error.message, variant: "destructive" });
+    },
   });
   const createSubMutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", "/api/staff/subscriptions", body),
@@ -98,7 +127,15 @@ export default function StaffDashboard() {
   });
   const createStaffMutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", "/api/staff/members", body),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/members"] }); setShowStaffModal(false); toast({ title: "員工已新增" }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/staff/members"] });
+      setNewStaffForm(INITIAL_STAFF_FORM);
+      setShowStaffModal(false);
+      toast({ title: "員工已新增" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "新增失敗", description: error.message, variant: "destructive" });
+    },
   });
   const logout = async () => {
     await apiRequest("POST", "/api/logout");
@@ -272,10 +309,24 @@ export default function StaffDashboard() {
                         <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
                         <input value={newClientForm.contactEmail} onChange={e=>setNewClientForm(f=>({...f,contactEmail:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                       </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">電話</label>
+                          <input value={newClientForm.contactPhone} onChange={e=>setNewClientForm(f=>({...f,contactPhone:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">統編</label>
+                          <input value={newClientForm.taxId} onChange={e=>setNewClientForm(f=>({...f,taxId:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">地址</label>
+                        <input value={newClientForm.address} onChange={e=>setNewClientForm(f=>({...f,address:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                      </div>
                     </div>
                     <div className="flex gap-2 mt-5">
                       <button onClick={() => createClientMutation.mutate(newClientForm)} disabled={createClientMutation.isPending} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">建立</button>
-                      <button onClick={()=>setShowClientModal(false)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                      <button onClick={()=>{ setNewClientForm(INITIAL_CLIENT_FORM); setShowClientModal(false); }} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
                     </div>
                   </div>
                 </div>
@@ -660,7 +711,7 @@ export default function StaffDashboard() {
                     </div>
                     <div className="flex gap-2 mt-5">
                       <button onClick={() => createStaffMutation.mutate(newStaffForm)} disabled={createStaffMutation.isPending} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">建立</button>
-                      <button onClick={()=>setShowStaffModal(false)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                      <button onClick={()=>{ setNewStaffForm(INITIAL_STAFF_FORM); setShowStaffModal(false); }} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
                     </div>
                   </div>
                 </div>

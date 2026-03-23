@@ -1,10 +1,10 @@
-import { pgTable, text, serial, integer, boolean, timestamp, json, real } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, timestamp, json, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Users table — supports 4 roles: user (elder), family, caregiver, admin
 export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   displayName: text("display_name").notNull(),
@@ -19,7 +19,7 @@ export const users = pgTable("users", {
 
 // Conversations / Chat sessions
 export const conversations = pgTable("conversations", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   userId: integer("user_id").notNull(),
   message: text("message").notNull(),
   sender: text("sender").notNull(), // "user" | "ai"
@@ -30,7 +30,7 @@ export const conversations = pgTable("conversations", {
 
 // Emotion log — daily emotional tracking
 export const emotionLogs = pgTable("emotion_logs", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   userId: integer("user_id").notNull(),
   date: text("date").notNull(), // YYYY-MM-DD
   score: integer("score").notNull(), // 1-5
@@ -41,7 +41,7 @@ export const emotionLogs = pgTable("emotion_logs", {
 
 // Memory bank — AI's memory of the elder
 export const memories = pgTable("memories", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   userId: integer("user_id").notNull(),
   category: text("category").notNull(), // "family" | "food" | "hobby" | "health" | "event"
   title: text("title").notNull(),
@@ -51,7 +51,7 @@ export const memories = pgTable("memories", {
 
 // Risk alerts — triggered by L2/L3 detection
 export const alerts = pgTable("alerts", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   userId: integer("user_id").notNull(),
   level: text("level").notNull(), // "yellow" | "red"
   trigger: text("trigger").notNull(), // what triggered it
@@ -63,7 +63,7 @@ export const alerts = pgTable("alerts", {
 
 // Personality settings — adjustable by caregiver/family
 export const personalitySettings = pgTable("personality_settings", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   userId: integer("user_id").notNull().unique(),
   tone: text("tone").default("warm"), // "warm" | "humorous" | "calm" | "encouraging"
   callFrequency: text("call_frequency").default("daily"), // "daily" | "twice_daily" | "weekly"
@@ -73,7 +73,7 @@ export const personalitySettings = pgTable("personality_settings", {
 
 // Scan records — uploaded documents (medication, appointment, events)
 export const scanRecords = pgTable("scan_records", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   elderlyId: integer("elderly_id").notNull(),
   uploadedBy: integer("uploaded_by").notNull(), // family or caregiver user id
   type: text("type").notNull(), // "medication" | "appointment" | "event" | "invitation"
@@ -89,7 +89,7 @@ export const scanRecords = pgTable("scan_records", {
 
 // Households — family container (PRD §5.2)
 export const households = pgTable("households", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   name: text("name").notNull(),
   primaryContactId: integer("primary_contact_id"),
   status: text("status").default("active"), // active | archived
@@ -98,7 +98,7 @@ export const households = pgTable("households", {
 
 // Episodes — care event tracking (PRD §7.3)
 export const episodes = pgTable("episodes", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   personId: integer("person_id").notNull(),
   category: text("category").notNull(), // missed_medication | loneliness | sleep | mood_decline | fall_risk | caregiver_burden
   status: text("status").notNull().default("open"), // open | in_progress | resolved | closed
@@ -110,7 +110,7 @@ export const episodes = pgTable("episodes", {
 
 // Tasks — action items (PRD §5.2)
 export const tasks = pgTable("tasks", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   ownerId: integer("owner_id"), // who is assigned
   ownerRole: text("owner_role").notNull(), // family_primary | caregiver | admin
   personId: integer("person_id").notNull(), // which care subject
@@ -125,7 +125,7 @@ export const tasks = pgTable("tasks", {
 
 // Audit Logs — append-only access trail (PRD §6)
 export const auditLogs = pgTable("audit_logs", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   actorId: integer("actor_id").notNull(),
   actorRole: text("actor_role").notNull(),
   action: text("action").notNull(), // view | export | update | create | delete | login | alert_handle
@@ -137,17 +137,17 @@ export const auditLogs = pgTable("audit_logs", {
 });
 
 // Insert schemas
-export const insertUserSchema = createInsertSchema(users).omit({ id: true });
-export const insertConversationSchema = createInsertSchema(conversations).omit({ id: true, timestamp: true });
-export const insertEmotionLogSchema = createInsertSchema(emotionLogs).omit({ id: true });
-export const insertMemorySchema = createInsertSchema(memories).omit({ id: true, createdAt: true });
-export const insertAlertSchema = createInsertSchema(alerts).omit({ id: true, createdAt: true });
-export const insertPersonalitySettingsSchema = createInsertSchema(personalitySettings).omit({ id: true });
-export const insertScanRecordSchema = createInsertSchema(scanRecords).omit({ id: true, createdAt: true });
-export const insertHouseholdSchema = createInsertSchema(households).omit({ id: true, createdAt: true });
-export const insertEpisodeSchema = createInsertSchema(episodes).omit({ id: true, openedAt: true });
-export const insertTaskSchema = createInsertSchema(tasks).omit({ id: true, createdAt: true, completedAt: true });
-export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, createdAt: true });
+export const insertUserSchema = createInsertSchema(users);
+export const insertConversationSchema = createInsertSchema(conversations).omit({ timestamp: true });
+export const insertEmotionLogSchema = createInsertSchema(emotionLogs);
+export const insertMemorySchema = createInsertSchema(memories).omit({ createdAt: true });
+export const insertAlertSchema = createInsertSchema(alerts).omit({ createdAt: true });
+export const insertPersonalitySettingsSchema = createInsertSchema(personalitySettings);
+export const insertScanRecordSchema = createInsertSchema(scanRecords).omit({ createdAt: true });
+export const insertHouseholdSchema = createInsertSchema(households).omit({ createdAt: true });
+export const insertEpisodeSchema = createInsertSchema(episodes).omit({ openedAt: true });
+export const insertTaskSchema = createInsertSchema(tasks).omit({ createdAt: true, completedAt: true });
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ createdAt: true });
 
 // Types
 export type User = typeof users.$inferSelect;
@@ -175,7 +175,7 @@ export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 
 // ── Staff (internal company users) ──────────────────────────
 export const staff = pgTable("staff", {
-  id: integer("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   displayName: text("display_name").notNull(),
@@ -185,13 +185,13 @@ export const staff = pgTable("staff", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertStaffSchema = createInsertSchema(staff).omit({ id: true, createdAt: true });
+export const insertStaffSchema = createInsertSchema(staff).omit({ createdAt: true });
 export type InsertStaff = z.infer<typeof insertStaffSchema>;
 export type Staff = typeof staff.$inferSelect;
 
 // ── Clients (buying organisations / social welfare orgs / individuals) ──
 export const clients = pgTable("clients", {
-  id: integer("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   clientType: text("client_type").notNull(), // "institution" | "social_welfare" | "individual"
   orgName: text("org_name"),          // 機構/社會局名稱
   contactName: text("contact_name").notNull(),
@@ -208,13 +208,13 @@ export const clients = pgTable("clients", {
   activatedAt: timestamp("activated_at"),
 });
 
-export const insertClientSchema = createInsertSchema(clients).omit({ id: true, createdAt: true, activatedAt: true });
+export const insertClientSchema = createInsertSchema(clients).omit({ createdAt: true, activatedAt: true });
 export type InsertClient = z.infer<typeof insertClientSchema>;
 export type Client = typeof clients.$inferSelect;
 
 // ── Plans (service tiers) ────────────────────────────────────
 export const plans = pgTable("plans", {
-  id: integer("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
   monthlyPrice: real("monthly_price").notNull(),
@@ -224,13 +224,13 @@ export const plans = pgTable("plans", {
   isActive: boolean("is_active").notNull().default(true),
 });
 
-export const insertPlanSchema = createInsertSchema(plans).omit({ id: true });
+export const insertPlanSchema = createInsertSchema(plans);
 export type InsertPlan = z.infer<typeof insertPlanSchema>;
 export type Plan = typeof plans.$inferSelect;
 
 // ── Subscriptions ────────────────────────────────────────────
 export const subscriptions = pgTable("subscriptions", {
-  id: integer("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   clientId: integer("client_id").notNull(),
   planId: integer("plan_id").notNull(),
   billingCycle: text("billing_cycle").notNull(), // "monthly" | "annual"
@@ -243,13 +243,13 @@ export const subscriptions = pgTable("subscriptions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({ id: true, createdAt: true });
+export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({ createdAt: true });
 export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
 export type Subscription = typeof subscriptions.$inferSelect;
 
 // ── Invoices ─────────────────────────────────────────────────
 export const invoices = pgTable("invoices", {
-  id: integer("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   invoiceNo: text("invoice_no").notNull().unique(),
   clientId: integer("client_id").notNull(),
   subscriptionId: integer("subscription_id"),
@@ -265,13 +265,13 @@ export const invoices = pgTable("invoices", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, createdAt: true });
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({ createdAt: true });
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 export type Invoice = typeof invoices.$inferSelect;
 
 // ── Payments ─────────────────────────────────────────────────
 export const payments = pgTable("payments", {
-  id: integer("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   invoiceId: integer("invoice_id").notNull(),
   clientId: integer("client_id").notNull(),
   amount: real("amount").notNull(),
@@ -283,13 +283,13 @@ export const payments = pgTable("payments", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true, createdAt: true });
+export const insertPaymentSchema = createInsertSchema(payments).omit({ createdAt: true });
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
 
 // ── Service Records (usage logs) ─────────────────────────────
 export const serviceRecords = pgTable("service_records", {
-  id: integer("id").primaryKey(),
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   clientId: integer("client_id").notNull(),
   subscriptionId: integer("subscription_id").notNull(),
   month: text("month").notNull(), // "2026-03"
@@ -301,6 +301,6 @@ export const serviceRecords = pgTable("service_records", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertServiceRecordSchema = createInsertSchema(serviceRecords).omit({ id: true, createdAt: true });
+export const insertServiceRecordSchema = createInsertSchema(serviceRecords).omit({ createdAt: true });
 export type InsertServiceRecord = z.infer<typeof insertServiceRecordSchema>;
 export type ServiceRecord = typeof serviceRecords.$inferSelect;

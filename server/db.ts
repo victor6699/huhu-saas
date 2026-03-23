@@ -3,7 +3,8 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from '@shared/schema';
 
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
+  console.error("⚠️  DATABASE_URL is not set. Please configure it in Render environment variables.");
+  process.exit(1);
 }
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });

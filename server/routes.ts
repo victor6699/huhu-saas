@@ -2,13 +2,110 @@ import type { Express } from "express";
 import type { Server } from "http";
 import session from "express-session";
 import MemoryStore from "memorystore";
+import { z } from "zod";
 import { storage } from "./storage";
 
 declare module "express-session" {
-  interface SessionData { staffId?: number; clientId?: number; role?: string; }
+  interface SessionData {
+    staffId?: number;
+    clientId?: number;
+    role?: string;
+  }
 }
 
-export async function registerRoutes(httpServer: Server, app: Express) {
+const loginSchema = z.object({
+  username: z.string().trim().min(1, "請輸入帳號"),
+  password: z.string().min(1, "請輸入密碼"),
+});
+
+const createClientPayloadSchema = z.object({
+  clientType: z.enum(["institution", "social_welfare", "individual"]),
+  orgName: z.string().trim().nullable().optional(),
+  contactName: z.string().trim().min(1, "請輸入聯絡人姓名"),
+  contactEmail: z.string().trim().email("Email 格式不正確"),
+  contactPhone: z.string().trim().nullable().optional(),
+  taxId: z.string().trim().nullable().optional(),
+  address: z.string().trim().nullable().optional(),
+  username: z.string().trim().min(3, "帳號至少需要 3 碼"),
+  password: z.string().min(6, "密碼至少需要 6 碼"),
+  status: z.enum(["pending", "active", "suspended", "cancelled"]).default("pending"),
+  notes: z.string().trim().nullable().optional(),
+  assignedTo: z.number().int().positive().nullable().optional(),
+});
+
+const createStaffPayloadSchema = z.object({
+  username: z.string().trim().min(3, "帳號至少需要 3 碼"),
+  password: z.string().min(6, "密碼至少需要 6 碼"),
+  displayName: z.string().trim().min(1, "請輸入姓名"),
+  role: z.enum(["superadmin", "sales", "finance", "support"]),
+  email: z.string().trim().email("Email 格式不正確"),
+  isActive: z.boolean().optional(),
+});
+
+const createSubscriptionPayloadSchema = z.object({
+  clientId: z.coerce.number().int().positive(),
+  planId: z.coerce.number().int().positive(),
+  billingCycle: z.enum(["monthly", "annual"]),
+  status: z.enum(["active", "expired", "cancelled", "trial"]).default("active"),
+  elderCount: z.coerce.number().int().positive(),
+  startDate: z.string().trim().min(1, "請輸入起始日"),
+  endDate: z.string().trim().min(1, "請輸入結束日"),
+  nextBillingDate: z.string().trim().min(1, "請輸入下次扣款日"),
+  amount: z.coerce.number().nonnegative(),
+});
+
+const createInvoicePayloadSchema = z.object({
+  clientId: z.coerce.number().int().positive(),
+  subscriptionId: z.coerce.number().int().positive().nullable().optional(),
+  issueDate: z.string().trim().min(1, "請輸入開立日期"),
+  dueDate: z.string().trim().min(1, "請輸入到期日"),
+  periodStart: z.string().trim().min(1, "請輸入計費起始日"),
+  periodEnd: z.string().trim().min(1, "請輸入計費結束日"),
+  subtotal: z.coerce.number().nonnegative(),
+  tax: z.coerce.number().nonnegative(),
+  total: z.coerce.number().nonnegative(),
+  status: z.enum(["unpaid", "paid", "overdue", "cancelled"]).default("unpaid"),
+  notes: z.string().trim().nullable().optional(),
+});
+
+const createPaymentPayloadSchema = z.object({
+  invoiceId: z.coerce.number().int().positive(),
+  clientId: z.coerce.number().int().positive(),
+  amount: z.coerce.number().positive(),
+  method: z.enum(["newebpay", "ecpay", "stripe", "bank_transfer", "manual"]),
+  status: z.enum(["pending", "success", "failed", "refunded"]).default("pending"),
+  transactionId: z.string().trim().nullable().optional(),
+  paidAt: z.date().nullable().optional(),
+  notes: z.string().trim().nullable().optional(),
+});
+
+const portalPaymentSchema = z.object({
+  invoiceId: z.coerce.number().int().positive(),
+  method: z.enum(["newebpay", "ecpay", "stripe", "bank_transfer", "manual"]),
+});
+
+const normalizeNullableText = (value?: string | null) => {
+  if (value == null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const parsePayload = <T>(schema: z.ZodType<T>, payload: unknown) => {
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    return {
+      ok: false as const,
+      message: parsed.error.issues[0]?.message ?? "資料格式不正確",
+    };
+  }
+
+  return { ok: true as const, data: parsed.data };
+};
+
+export async function registerRoutes(_httpServer: Server, app: Express) {
   const MStore = MemoryStore(session);
   app.use(session({
     secret: "huhu-saas-secret-2026",
@@ -18,41 +115,115 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     cookie: { maxAge: 86400000 },
   }));
 
-  // ── Auth ────────────────────────────────────────────────────
+  const assertClientUniqueness = async (username: string, email: string) => {
+    const [existingByUsername, existingByEmail] = await Promise.all([
+      storage.getClientByUsername(username),
+      storage.getClientByEmail(email),
+    ]);
 
-  // Staff login
+    if (existingByUsername) {
+      return { status: 409, message: "這個帳號已經被使用" };
+    }
+
+    if (existingByEmail) {
+      return { status: 409, message: "這個 Email 已經被使用" };
+    }
+
+    return null;
+  };
+
+  const assertStaffUniqueness = async (username: string) => {
+    const existing = await storage.getStaffByUsername(username);
+    if (existing) {
+      return { status: 409, message: "這個員工帳號已經存在" };
+    }
+
+    return null;
+  };
+
+  const requireStaff = (req: any, res: any, next: any) => {
+    if (!req.session.staffId) {
+      return res.status(401).json({ message: "請先登入後台帳號" });
+    }
+
+    next();
+  };
+
+  const requireClient = (req: any, res: any, next: any) => {
+    if (!req.session.clientId) {
+      return res.status(401).json({ message: "請先登入客戶帳號" });
+    }
+
+    next();
+  };
+
   app.post("/api/staff/login", async (req, res) => {
-    const { username, password } = req.body;
-    const s = await storage.getStaffByUsername(username);
-    if (!s || s.password !== password || !s.isActive) return res.status(401).json({ message: "帳號或密碼錯誤" });
-    req.session.staffId = s.id;
+    const parsed = parsePayload(loginSchema, req.body);
+    if (!parsed.ok) {
+      return res.status(400).json({ message: parsed.message });
+    }
+
+    const staff = await storage.getStaffByUsername(parsed.data.username);
+    if (!staff || staff.password !== parsed.data.password || !staff.isActive) {
+      return res.status(401).json({ message: "帳號或密碼錯誤" });
+    }
+
+    req.session.staffId = staff.id;
     req.session.role = "staff";
-    res.json({ id: s.id, displayName: s.displayName, role: s.role, username: s.username });
+    res.json({ id: staff.id, displayName: staff.displayName, role: staff.role, username: staff.username });
   });
 
-  // Client login
   app.post("/api/client/login", async (req, res) => {
-    const { username, password } = req.body;
-    const c = await storage.getClientByUsername(username);
-    if (!c || c.password !== password) return res.status(401).json({ message: "帳號或密碼錯誤" });
-    if (c.status === "suspended") return res.status(403).json({ message: "帳號已停用，請聯絡客服" });
-    req.session.clientId = c.id;
+    const parsed = parsePayload(loginSchema, req.body);
+    if (!parsed.ok) {
+      return res.status(400).json({ message: parsed.message });
+    }
+
+    const client = await storage.getClientByUsername(parsed.data.username);
+    if (!client || client.password !== parsed.data.password) {
+      return res.status(401).json({ message: "帳號或密碼錯誤" });
+    }
+
+    if (client.status === "suspended") {
+      return res.status(403).json({ message: "帳號已停用，請聯繫客服" });
+    }
+
+    req.session.clientId = client.id;
     req.session.role = "client";
-    res.json({ id: c.id, orgName: c.orgName, contactName: c.contactName, clientType: c.clientType, status: c.status });
+    res.json({
+      id: client.id,
+      orgName: client.orgName,
+      contactName: client.contactName,
+      clientType: client.clientType,
+      status: client.status,
+    });
   });
 
-  // Client self-register
   app.post("/api/client/register", async (req, res) => {
-    const { username, password, contactName, contactEmail, clientType, orgName, contactPhone, taxId, address } = req.body;
-    const existing = await storage.getClientByUsername(username);
-    if (existing) return res.status(400).json({ message: "此帳號已存在" });
-    const emailEx = await storage.getClientByEmail(contactEmail);
-    if (emailEx) return res.status(400).json({ message: "此Email已註冊" });
-    const c = await storage.createClient({ username, password, contactName, contactEmail, clientType, orgName: orgName || null, contactPhone: contactPhone || null, taxId: taxId || null, address: address || null, status: "pending", notes: null, assignedTo: null });
-    res.json({ id: c.id, message: "註冊成功，等待審核開通" });
+    const parsed = parsePayload(createClientPayloadSchema, {
+      ...req.body,
+      orgName: normalizeNullableText(req.body?.orgName),
+      contactPhone: normalizeNullableText(req.body?.contactPhone),
+      taxId: normalizeNullableText(req.body?.taxId),
+      address: normalizeNullableText(req.body?.address),
+      notes: null,
+      assignedTo: null,
+      status: "pending",
+    });
+
+    if (!parsed.ok) {
+      return res.status(400).json({ message: parsed.message });
+    }
+
+    const duplicate = await assertClientUniqueness(parsed.data.username, parsed.data.contactEmail);
+    if (duplicate) {
+      return res.status(duplicate.status).json({ message: duplicate.message });
+    }
+
+    const client = await storage.createClient(parsed.data);
+    res.json({ id: client.id, message: "申請已送出，等待後台審核開通" });
   });
 
-  // Logout
   app.post("/api/logout", (req, res) => {
     req.session.destroy(() => {
       res.clearCookie("connect.sid");
@@ -60,166 +231,307 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     });
   });
 
-  // Whoami
   app.get("/api/me", async (req, res) => {
     if (req.session.staffId) {
-      const s = await storage.getStaff(req.session.staffId);
-      if (!s) return res.status(401).json({ message: "Unauthorized" });
-      return res.json({ type: "staff", id: s.id, displayName: s.displayName, role: s.role, username: s.username });
+      const staff = await storage.getStaff(req.session.staffId);
+      if (!staff) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      return res.json({ type: "staff", id: staff.id, displayName: staff.displayName, role: staff.role, username: staff.username });
     }
+
     if (req.session.clientId) {
-      const c = await storage.getClient(req.session.clientId);
-      if (!c) return res.status(401).json({ message: "Unauthorized" });
-      return res.json({ type: "client", id: c.id, orgName: c.orgName, contactName: c.contactName, clientType: c.clientType, status: c.status });
+      const client = await storage.getClient(req.session.clientId);
+      if (!client) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      return res.json({
+        type: "client",
+        id: client.id,
+        orgName: client.orgName,
+        contactName: client.contactName,
+        clientType: client.clientType,
+        status: client.status,
+      });
     }
+
     res.status(401).json({ message: "Unauthorized" });
   });
 
-  // ── Staff-only middleware ────────────────────────────────────
-  const requireStaff = (req: any, res: any, next: any) => {
-    if (!req.session.staffId) return res.status(401).json({ message: "需要員工登入" });
-    next();
-  };
-
-  // ── Client-only middleware ───────────────────────────────────
-  const requireClient = (req: any, res: any, next: any) => {
-    if (!req.session.clientId) return res.status(401).json({ message: "需要客戶登入" });
-    next();
-  };
-
-  // ── Plans (public) ──────────────────────────────────────────
   app.get("/api/plans", async (_req, res) => {
     const plans = await storage.getAllPlans();
-    res.json(plans.filter(p => p.isActive));
+    res.json(plans.filter((plan) => plan.isActive));
   });
 
-  // ── Staff APIs ──────────────────────────────────────────────
-
-  // Clients management
   app.get("/api/staff/clients", requireStaff, async (_req, res) => {
     res.json(await storage.getAllClients());
   });
+
   app.get("/api/staff/clients/:id", requireStaff, async (req, res) => {
-    const c = await storage.getClient(Number(req.params.id));
-    if (!c) return res.status(404).json({ message: "Not found" });
-    res.json(c);
-  });
-  app.post("/api/staff/clients", requireStaff, async (req, res) => {
-    const c = await storage.createClient(req.body);
-    res.json(c);
-  });
-  app.patch("/api/staff/clients/:id", requireStaff, async (req, res) => {
-    const c = await storage.updateClient(Number(req.params.id), req.body);
-    if (!c) return res.status(404).json({ message: "Not found" });
-    res.json(c);
-  });
-  // Activate client
-  app.post("/api/staff/clients/:id/activate", requireStaff, async (req, res) => {
-    const c = await storage.updateClient(Number(req.params.id), { status: "active", activatedAt: new Date() });
-    res.json(c);
-  });
-  // Suspend client
-  app.post("/api/staff/clients/:id/suspend", requireStaff, async (req, res) => {
-    const c = await storage.updateClient(Number(req.params.id), { status: "suspended" });
-    res.json(c);
+    const client = await storage.getClient(Number(req.params.id));
+    if (!client) {
+      return res.status(404).json({ message: "找不到客戶" });
+    }
+
+    res.json(client);
   });
 
-  // Staff management
+  app.post("/api/staff/clients", requireStaff, async (req, res) => {
+    const parsed = parsePayload(createClientPayloadSchema, {
+      ...req.body,
+      orgName: normalizeNullableText(req.body?.orgName),
+      contactPhone: normalizeNullableText(req.body?.contactPhone),
+      taxId: normalizeNullableText(req.body?.taxId),
+      address: normalizeNullableText(req.body?.address),
+      notes: normalizeNullableText(req.body?.notes),
+      assignedTo: req.body?.assignedTo ? Number(req.body.assignedTo) : null,
+      status: req.body?.status ?? "pending",
+    });
+
+    if (!parsed.ok) {
+      return res.status(400).json({ message: parsed.message });
+    }
+
+    const duplicate = await assertClientUniqueness(parsed.data.username, parsed.data.contactEmail);
+    if (duplicate) {
+      return res.status(duplicate.status).json({ message: duplicate.message });
+    }
+
+    if (parsed.data.assignedTo != null) {
+      const staff = await storage.getStaff(parsed.data.assignedTo);
+      if (!staff) {
+        return res.status(404).json({ message: "指定的員工不存在" });
+      }
+    }
+
+    const client = await storage.createClient(parsed.data);
+    res.json(client);
+  });
+
+  app.patch("/api/staff/clients/:id", requireStaff, async (req, res) => {
+    const client = await storage.updateClient(Number(req.params.id), req.body);
+    if (!client) {
+      return res.status(404).json({ message: "找不到客戶" });
+    }
+
+    res.json(client);
+  });
+
+  app.post("/api/staff/clients/:id/activate", requireStaff, async (req, res) => {
+    const client = await storage.updateClient(Number(req.params.id), { status: "active", activatedAt: new Date() });
+    if (!client) {
+      return res.status(404).json({ message: "找不到客戶" });
+    }
+
+    res.json(client);
+  });
+
+  app.post("/api/staff/clients/:id/suspend", requireStaff, async (req, res) => {
+    const client = await storage.updateClient(Number(req.params.id), { status: "suspended" });
+    if (!client) {
+      return res.status(404).json({ message: "找不到客戶" });
+    }
+
+    res.json(client);
+  });
+
   app.get("/api/staff/members", requireStaff, async (_req, res) => {
     const all = await storage.getAllStaff();
-    res.json(all.map(s => ({ ...s, password: undefined })));
-  });
-  app.post("/api/staff/members", requireStaff, async (req, res) => {
-    const s = await storage.createStaff(req.body);
-    res.json({ ...s, password: undefined });
+    res.json(all.map((staff) => ({ ...staff, password: undefined })));
   });
 
-  // Subscriptions (staff)
+  app.post("/api/staff/members", requireStaff, async (req, res) => {
+    const parsed = parsePayload(createStaffPayloadSchema, req.body);
+    if (!parsed.ok) {
+      return res.status(400).json({ message: parsed.message });
+    }
+
+    const duplicate = await assertStaffUniqueness(parsed.data.username);
+    if (duplicate) {
+      return res.status(duplicate.status).json({ message: duplicate.message });
+    }
+
+    const staff = await storage.createStaff({
+      ...parsed.data,
+      isActive: parsed.data.isActive ?? true,
+    });
+    res.json({ ...staff, password: undefined });
+  });
+
   app.get("/api/staff/subscriptions", requireStaff, async (_req, res) => {
     res.json(await storage.getAllSubscriptions());
   });
+
   app.post("/api/staff/subscriptions", requireStaff, async (req, res) => {
-    const s = await storage.createSubscription(req.body);
-    res.json(s);
-  });
-  app.patch("/api/staff/subscriptions/:id", requireStaff, async (req, res) => {
-    const s = await storage.updateSubscription(Number(req.params.id), req.body);
-    if (!s) return res.status(404).json({ message: "Not found" });
-    res.json(s);
+    const parsed = parsePayload(createSubscriptionPayloadSchema, req.body);
+    if (!parsed.ok) {
+      return res.status(400).json({ message: parsed.message });
+    }
+
+    const [client, plan] = await Promise.all([
+      storage.getClient(parsed.data.clientId),
+      storage.getPlan(parsed.data.planId),
+    ]);
+
+    if (!client) {
+      return res.status(404).json({ message: "找不到客戶" });
+    }
+
+    if (!plan) {
+      return res.status(404).json({ message: "找不到方案" });
+    }
+
+    const subscription = await storage.createSubscription(parsed.data);
+    res.json(subscription);
   });
 
-  // Invoices (staff)
+  app.patch("/api/staff/subscriptions/:id", requireStaff, async (req, res) => {
+    const subscription = await storage.updateSubscription(Number(req.params.id), req.body);
+    if (!subscription) {
+      return res.status(404).json({ message: "找不到訂閱" });
+    }
+
+    res.json(subscription);
+  });
+
   app.get("/api/staff/invoices", requireStaff, async (_req, res) => {
     res.json(await storage.getAllInvoices());
   });
+
   app.post("/api/staff/invoices", requireStaff, async (req, res) => {
-    // Auto-generate invoice number
-    const all = await storage.getAllInvoices();
+    const parsed = parsePayload(createInvoicePayloadSchema, {
+      ...req.body,
+      subscriptionId: req.body?.subscriptionId ? Number(req.body.subscriptionId) : null,
+      notes: normalizeNullableText(req.body?.notes),
+    });
+
+    if (!parsed.ok) {
+      return res.status(400).json({ message: parsed.message });
+    }
+
+    const client = await storage.getClient(parsed.data.clientId);
+    if (!client) {
+      return res.status(404).json({ message: "找不到客戶" });
+    }
+
+    if (parsed.data.subscriptionId != null) {
+      const subscription = await storage.getSubscription(parsed.data.subscriptionId);
+      if (!subscription) {
+        return res.status(404).json({ message: "找不到訂閱" });
+      }
+
+      if (subscription.clientId !== parsed.data.clientId) {
+        return res.status(400).json({ message: "訂閱與客戶不一致" });
+      }
+    }
+
+    const allInvoices = await storage.getAllInvoices();
     const year = new Date().getFullYear();
-    const seq = String(all.length + 1).padStart(4, "0");
-    const invoiceNo = `INV-${year}-${seq}`;
-    const inv = await storage.createInvoice({ ...req.body, invoiceNo });
-    res.json(inv);
-  });
-  app.patch("/api/staff/invoices/:id", requireStaff, async (req, res) => {
-    const inv = await storage.updateInvoice(Number(req.params.id), req.body);
-    if (!inv) return res.status(404).json({ message: "Not found" });
-    res.json(inv);
+    const sequence = String(allInvoices.length + 1).padStart(4, "0");
+    const invoiceNo = `INV-${year}-${sequence}`;
+
+    const invoice = await storage.createInvoice({ ...parsed.data, invoiceNo });
+    res.json(invoice);
   });
 
-  // Payments (staff)
+  app.patch("/api/staff/invoices/:id", requireStaff, async (req, res) => {
+    const invoice = await storage.updateInvoice(Number(req.params.id), req.body);
+    if (!invoice) {
+      return res.status(404).json({ message: "找不到帳單" });
+    }
+
+    res.json(invoice);
+  });
+
   app.get("/api/staff/payments", requireStaff, async (_req, res) => {
     res.json(await storage.getAllPayments());
   });
+
   app.post("/api/staff/payments", requireStaff, async (req, res) => {
-    const p = await storage.createPayment(req.body);
-    // Mark invoice as paid
-    if (p.status === "success") {
-      await storage.updateInvoice(p.invoiceId, { status: "paid" });
+    const parsed = parsePayload(createPaymentPayloadSchema, {
+      ...req.body,
+      paidAt: req.body?.paidAt ? new Date(req.body.paidAt) : new Date(),
+      notes: normalizeNullableText(req.body?.notes),
+    });
+
+    if (!parsed.ok) {
+      return res.status(400).json({ message: parsed.message });
     }
-    res.json(p);
-  });
-  app.patch("/api/staff/payments/:id", requireStaff, async (req, res) => {
-    const p = await storage.updatePayment(Number(req.params.id), req.body);
-    if (!p) return res.status(404).json({ message: "Not found" });
-    if (p.status === "success") await storage.updateInvoice(p.invoiceId, { status: "paid" });
-    res.json(p);
+
+    const invoice = await storage.getInvoice(parsed.data.invoiceId);
+    if (!invoice) {
+      return res.status(404).json({ message: "找不到帳單" });
+    }
+
+    if (invoice.clientId !== parsed.data.clientId) {
+      return res.status(400).json({ message: "付款客戶與帳單不一致" });
+    }
+
+    const payment = await storage.createPayment(parsed.data);
+    if (payment.status === "success") {
+      await storage.updateInvoice(payment.invoiceId, { status: "paid" });
+    }
+
+    res.json(payment);
   });
 
-  // Service records (staff)
+  app.patch("/api/staff/payments/:id", requireStaff, async (req, res) => {
+    const payment = await storage.updatePayment(Number(req.params.id), req.body);
+    if (!payment) {
+      return res.status(404).json({ message: "找不到付款" });
+    }
+
+    if (payment.status === "success") {
+      await storage.updateInvoice(payment.invoiceId, { status: "paid" });
+    }
+
+    res.json(payment);
+  });
+
   app.get("/api/staff/service-records", requireStaff, async (_req, res) => {
     res.json(await storage.getAllServiceRecords());
   });
+
   app.post("/api/staff/service-records", requireStaff, async (req, res) => {
-    const s = await storage.createServiceRecord(req.body);
-    res.json(s);
+    const serviceRecord = await storage.createServiceRecord(req.body);
+    res.json(serviceRecord);
   });
 
-  // Dashboard stats (staff)
   app.get("/api/staff/stats", requireStaff, async (_req, res) => {
-    const [clients, subscriptions, invoices, payments] = await Promise.all([
+    const [clients, subscriptions, invoices] = await Promise.all([
       storage.getAllClients(),
       storage.getAllSubscriptions(),
       storage.getAllInvoices(),
-      storage.getAllPayments(),
     ]);
-    const activeClients = clients.filter(c => c.status === "active").length;
-    const pendingClients = clients.filter(c => c.status === "pending").length;
-    const activeSubscriptions = subscriptions.filter(s => s.status === "active").length;
-    const unpaidInvoices = invoices.filter(i => i.status === "unpaid" || i.status === "overdue");
-    const unpaidAmount = unpaidInvoices.reduce((sum, i) => sum + i.total, 0);
-    const paidAmount = invoices.filter(i => i.status === "paid").reduce((sum, i) => sum + i.total, 0);
+
+    const activeClients = clients.filter((client) => client.status === "active").length;
+    const pendingClients = clients.filter((client) => client.status === "pending").length;
+    const activeSubscriptions = subscriptions.filter((subscription) => subscription.status === "active").length;
+    const unpaidInvoices = invoices.filter((invoice) => invoice.status === "unpaid" || invoice.status === "overdue");
+    const unpaidAmount = unpaidInvoices.reduce((sum, invoice) => sum + invoice.total, 0);
+    const paidAmount = invoices
+      .filter((invoice) => invoice.status === "paid")
+      .reduce((sum, invoice) => sum + invoice.total, 0);
     const mrr = subscriptions
-      .filter(s => s.status === "active")
-      .reduce((sum, s) => sum + (s.billingCycle === "annual" ? s.amount / 12 : s.amount), 0);
-    res.json({ activeClients, pendingClients, activeSubscriptions, unpaidInvoices: unpaidInvoices.length, unpaidAmount, paidAmount, mrr });
+      .filter((subscription) => subscription.status === "active")
+      .reduce((sum, subscription) => sum + (subscription.billingCycle === "annual" ? subscription.amount / 12 : subscription.amount), 0);
+
+    res.json({
+      activeClients,
+      pendingClients,
+      activeSubscriptions,
+      unpaidInvoices: unpaidInvoices.length,
+      unpaidAmount,
+      paidAmount,
+      mrr,
+    });
   });
 
-  // ── Client Portal APIs ───────────────────────────────────────
-
   app.get("/api/portal/me", requireClient, async (req, res) => {
-    const c = await storage.getClient(req.session.clientId!);
-    res.json(c);
+    const client = await storage.getClient(req.session.clientId!);
+    res.json(client);
   });
 
   app.get("/api/portal/subscriptions", requireClient, async (req, res) => {
@@ -234,22 +546,38 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(await storage.getServiceRecordsByClient(req.session.clientId!));
   });
 
-  // Simulate payment (NewebPay / ECPay / Stripe mock)
   app.post("/api/portal/pay", requireClient, async (req, res) => {
-    const { invoiceId, method } = req.body;
-    const invoice = await storage.getInvoice(invoiceId);
-    if (!invoice) return res.status(404).json({ message: "帳單不存在" });
-    if (invoice.clientId !== req.session.clientId) return res.status(403).json({ message: "無權限" });
-    if (invoice.status === "paid") return res.status(400).json({ message: "此帳單已付款" });
+    const parsed = parsePayload(portalPaymentSchema, req.body);
+    if (!parsed.ok) {
+      return res.status(400).json({ message: parsed.message });
+    }
 
-    // Mock payment gateway response
-    const txId = `${method.toUpperCase()}-${Date.now()}`;
+    const invoice = await storage.getInvoice(parsed.data.invoiceId);
+    if (!invoice) {
+      return res.status(404).json({ message: "找不到帳單" });
+    }
+
+    if (invoice.clientId !== req.session.clientId) {
+      return res.status(403).json({ message: "沒有這張帳單的付款權限" });
+    }
+
+    if (invoice.status === "paid") {
+      return res.status(400).json({ message: "這張帳單已經付款" });
+    }
+
+    const transactionId = `${parsed.data.method.toUpperCase()}-${Date.now()}`;
     const payment = await storage.createPayment({
-      invoiceId, clientId: req.session.clientId!, amount: invoice.total,
-      method, status: "success", transactionId: txId, paidAt: new Date(), notes: "線上付款成功（模擬）",
+      invoiceId: parsed.data.invoiceId,
+      clientId: req.session.clientId!,
+      amount: invoice.total,
+      method: parsed.data.method,
+      status: "success",
+      transactionId,
+      paidAt: new Date(),
+      notes: "mock gateway success",
     });
-    await storage.updateInvoice(invoiceId, { status: "paid" });
-    res.json({ success: true, transactionId: txId, payment });
-  });
 
+    await storage.updateInvoice(parsed.data.invoiceId, { status: "paid" });
+    res.json({ success: true, transactionId, payment });
+  });
 }
