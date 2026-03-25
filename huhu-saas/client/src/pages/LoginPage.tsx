@@ -6,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 export default function LoginPage() {
   const [, nav] = useLocation();
   const { toast } = useToast();
-  const [tab, setTab] = useState<"staff" | "client" | "register">("client");
+  const [tab, setTab] = useState<"staff" | "client">("client");
   const [form, setForm] = useState({ username: "", password: "", contactName: "", contactEmail: "", clientType: "institution", orgName: "", contactPhone: "", taxId: "", address: "" });
   const [loading, setLoading] = useState(false);
 
@@ -61,12 +61,12 @@ export default function LoginPage() {
 
         {/* Card */}
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-          {/* Tabs */}
+          {/* Tabs: client & staff only — individual users register via HUHU CARE app */}
           <div className="flex border-b">
-            {(["client","staff","register"] as const).map(t => (
+            {(["client","staff"] as const).map(t => (
               <button key={t} onClick={() => setTab(t)}
                 className={`flex-1 py-3 text-sm font-medium transition-colors ${tab === t ? "text-blue-600 border-b-2 border-blue-600 bg-blue-50" : "text-gray-500 hover:text-gray-700"}`}>
-                {t === "client" ? "客戶登入" : t === "staff" ? "員工登入" : "新客戶註冊"}
+                {t === "client" ? "機構/單位登入" : "員工登入"}
               </button>
             ))}
           </div>
@@ -157,8 +157,14 @@ export default function LoginPage() {
             )}
             <button type="submit" disabled={loading} data-testid="button-submit"
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-60">
-              {loading ? "處理中..." : tab === "register" ? "申請開通" : "登入"}
+              {loading ? "處理中..." : "登入"}
             </button>
+            <p className="text-center text-xs text-gray-400 mt-1">
+              忘記密碼？請聯絡客服 <a href="mailto:support@huhu.ai" className="text-blue-500 underline">support@huhu.ai</a>
+            </p>
+            <p className="text-center text-xs text-gray-400">
+              個人用戶請由 <span className="font-semibold text-blue-600">HUHU Care</span> App 訂閱頁面註冊。
+            </p>
           </form>
         </div>
         <p className="text-center text-blue-300 text-xs mt-6">© 2026 HuHu AI · <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer" className="underline">Created with Perplexity Computer</a></p>
