@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, forceLogout } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 type Staff = { id: number; displayName: string; role: string; username: string; email: string; isActive: boolean };
@@ -138,9 +138,7 @@ export default function StaffDashboard() {
     },
   });
   const logout = async () => {
-    await apiRequest("POST", "/api/logout");
-    queryClient.clear();
-    nav("/");
+    await forceLogout();
   };
 
   const clientName = (id: number) => {

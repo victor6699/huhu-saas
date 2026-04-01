@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, forceLogout } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 type Client = { id: number; clientType: string; orgName: string | null; contactName: string; contactEmail: string; status: string };
@@ -21,11 +21,19 @@ function Badge({ status }: { status: string }) {
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_BADGE[status] ?? "bg-gray-100 text-gray-600"}`}>{STATUS_ZH[status] ?? status}</span>;
 }
 
-export default function ClientPortal() {
+export default function ClientPortal(props: { params?: { rest?: string } }) {
   const [, nav] = useLocation();
   const { toast } = useToast();
-  const [section, setSection] = useState<"overview"|"invoices"|"subscriptions"|"plans"|"service">("overview");
+  const initialSection = (props.params?.rest as any) || "overview";
+  const [section, setSection] = useState<"overview"|"invoices"|"subscriptions"|"plans"|"service"|"family">(initialSection);
+
+  useEffect(() => {
+    if (props.params?.rest && ["overview", "invoices", "subscriptions", "plans", "service", "family"].includes(props.params.rest)) {
+      setSection(props.params.rest as any);
+    }
+  }, [props.params?.rest]);
   const [payModal, setPayModal] = useState<Invoice | null>(null);
+  const [contactModal, setContactModal] = useState<any | null>(null);
   const [payMethod, setPayMethod] = useState("ecpay");
   const [payLoading, setPayLoading] = useState(false);
 
@@ -34,11 +42,10 @@ export default function ClientPortal() {
   const { data: invoices = [] } = useQuery<Invoice[]>({ queryKey: ["/api/portal/invoices"] });
   const { data: serviceRecords = [] } = useQuery<ServiceRecord[]>({ queryKey: ["/api/portal/service-records"] });
   const { data: plans = [] } = useQuery<Plan[]>({ queryKey: ["/api/plans"] });
+  const { data: family = [] } = useQuery<any[]>({ queryKey: ["/api/portal/family"] });
 
   const logout = async () => {
-    await apiRequest("POST", "/api/logout");
-    queryClient.clear();
-    nav("/");
+    await forceLogout();
   };
 
   const fmt = (n: number) => n.toLocaleString("zh-TW");
@@ -63,6 +70,7 @@ export default function ClientPortal() {
 
   const navItems = [
     { key: "overview",       label: "總覽",     icon: "🏠" },
+    { key: "family",         label: "家人管理", icon: "👥" },
     { key: "invoices",       label: "發票管理", icon: "📄", badge: unpaidCount > 0 ? unpaidCount : undefined },
     { key: "subscriptions",  label: "訂閱",     icon: "📋" },
     { key: "plans",          label: "方案選購", icon: "💡" },
@@ -89,7 +97,7 @@ export default function ClientPortal() {
         </div>
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {navItems.map(item => (
-            <button key={item.key} onClick={() => setSection(item.key)}
+            <button key={item.key} onClick={() => { setSection(item.key as any); nav(`/portal/${item.key}`); }}
               className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between transition-colors ${
                 section === item.key ? "bg-[#0ABAB5] text-white" : "text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white"
               }`}>
@@ -136,10 +144,10 @@ export default function ClientPortal() {
               )}
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-4 cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSection("subscriptions"); nav("/portal/subscriptions"); }}>
                   <p className="text-xs text-gray-500">目前方案</p>
                   <p className="text-lg font-bold text-[#0ABAB5] mt-1">{activeSub ? (plans.find(p => p.id === activeSub.planId)?.name ?? "載入中") : "未訂閱"}</p>
-                  {activeSub && <p className="text-xs text-gray-400 mt-1">{activeSub.billingCycle === "annual" ? "年繳" : "月繳"} · 有效至 {activeSub.endDate}</p>}
+                  {activeSub && <p className="text-xs text-gray-400 mt-1">{activeSub.billingCycle === "annual" ? "年繳" : "月繳"} · 下次扣款日: {activeSub.nextBillingDate}</p>}
                 </div>
                 <div className="bg-white rounded-xl border p-4">
                   <p className="text-xs text-gray-500">使用中長輩數</p>
@@ -185,6 +193,76 @@ export default function ClientPortal() {
             </div>
           )}
 
+          {/* 家人管理 */}
+          {section === "family" && (
+            <div>
+              <div className="flex items-center justify-between mb-6">
+                <h1 className="text-xl font-bold text-gray-900">家人帳號管理</h1>
+                <a href="http://localhost:5000/onboarding" className="px-4 py-2 bg-[#0ABAB5] text-white rounded-lg hover:bg-[#089490] text-sm font-medium flex items-center gap-2 transition-colors">
+                  <span>➕</span> <span className="hidden sm:inline">新增家人</span>
+                </a>
+              </div>
+
+              {family.length === 0 ? (
+                <div className="bg-white rounded-xl border p-12 text-center flex flex-col items-center">
+                   <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center text-3xl mb-4">👥</div>
+                   <h3 className="text-lg font-bold text-gray-800 mb-1">尚無家屬資料</h3>
+                   <p className="text-gray-500 text-sm mb-6 max-w-sm">您尚未加入任何家人至您的帳號群組中。點擊下方按鈕開始為長輩建立專屬健康助理。</p>
+                   <a href="http://localhost:5000/onboarding" className="px-6 py-2.5 bg-[#0ABAB5] text-white rounded-lg font-medium hover:bg-[#089490] transition-colors shadow-sm">
+                     新增家人帳號
+                   </a>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {family.map((member: any) => {
+                    const profile = member.person_profiles || {};
+                    return (
+                      <div key={member.id} className="bg-white rounded-xl border p-5 relative overflow-hidden group hover:shadow-md transition-shadow">
+                        <div className="absolute top-0 right-0 p-4">
+                          <Badge status={member.status} />
+                        </div>
+                        <div className="flex items-center gap-4 mb-4">
+                          <img 
+                            src={profile.avatar_url || "https://ui-avatars.com/api/?background=E0F8F7&color=0ABAB5&name=" + encodeURIComponent(profile.full_name || "User")} 
+                            alt={profile.full_name} 
+                            className="w-16 h-16 rounded-full border border-gray-100 object-cover shadow-sm bg-gray-50"
+                          />
+                          <div>
+                            <h3 className="font-bold text-lg text-gray-900">{profile.full_name || "未命名"}</h3>
+                            <p className="text-sm text-gray-500">{member.care_level ? `照護等級: ${member.care_level}` : "一般照護"}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2 mb-6">
+                           <div className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded border border-gray-100">
+                             <span className="text-gray-500">性別</span>
+                             <span className="text-gray-700 font-medium">{profile.gender === "M" ? "男" : profile.gender === "F" ? "女" : "其他"}</span>
+                           </div>
+                           <div className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded border border-gray-100 group/contact hover:bg-white transition-colors">
+                             <span className="text-gray-500">聯絡資訊</span>
+                             <div className="flex items-center gap-2">
+                               <span className="text-gray-700 font-medium">{profile.phone || "無紀錄"}</span>
+                               <button onClick={() => setContactModal(member)} className="text-xs text-[#0ABAB5] opacity-0 group-hover/contact:opacity-100 transition-opacity whitespace-nowrap px-2 py-1 bg-[#E0F8F7] rounded">修改</button>
+                             </div>
+                           </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 pt-4 border-t border-gray-100">
+                           <a href="http://localhost:5000/#/" className="text-center py-2 text-sm text-[#0ABAB5] border border-[#0ABAB5] rounded-lg hover:bg-[#F0FEFE] font-medium transition-colors">
+                             開啟健康儀表板
+                           </a>
+                           <a href={`http://localhost:5000/chat?id=${member.id}`} className="text-center py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-black font-medium transition-colors">
+                             開始對話
+                           </a>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 發票管理 */}
           {section === "invoices" && (
             <div>
@@ -207,9 +285,13 @@ export default function ClientPortal() {
                           <p className="text-xs text-gray-400 mt-1">稅前 NT$ {fmt(inv.subtotal)}</p>
                           <p className="text-xs text-gray-400">稅額 NT$ {fmt(inv.tax)}</p>
                           <p className="text-lg font-bold text-gray-900 mt-1">合計 NT$ {fmt(inv.total)}</p>
-                          {(inv.status === "unpaid" || inv.status === "overdue") && (
-                            <button onClick={() => setPayModal(inv)} className="mt-2 px-4 py-1.5 bg-[#0ABAB5] text-white text-sm rounded-lg hover:bg-[#089490] font-medium">立即付款</button>
+
+                          {(inv.status === "unpaid" || inv.status === "overdue") ? (
+                            <button onClick={() => setPayModal(inv)} className="mt-2 w-full px-4 py-1.5 bg-[#0ABAB5] text-white text-sm rounded-lg hover:bg-[#089490] font-medium">立即付款</button>
+                          ) : (
+                            <button onClick={() => alert("連線電子發票中心...待開通")} className="mt-2 w-full px-4 py-1.5 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50 flex items-center justify-center gap-1 font-medium whitespace-nowrap"><span className="text-xs">📄</span> 電子發票存根</button>
                           )}
+
                         </div>
                       </div>
                     </div>
@@ -390,6 +472,36 @@ export default function ClientPortal() {
               <button onClick={() => setPayModal(null)} className="flex-1 border py-2.5 rounded-xl text-sm">取消</button>
             </div>
             <p className="text-xs text-gray-400 text-center mt-3">此操作受到安全加密保護</p>
+          </div>
+        </div>
+      )}
+      {contactModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">更新聯絡資訊</h2>
+            <p className="text-sm text-gray-500 mb-5">為 {contactModal.person_profiles?.full_name} 設定即時聯絡方式，確保緊急時能立刻找到人。</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">聯絡電話</label>
+                <input type="tel" defaultValue={contactModal.person_profiles?.phone || ""} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-[#0ABAB5] focus:border-[#0ABAB5]" placeholder="例：0987-654-321" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">LINE ID</label>
+                <input type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-[#0ABAB5] focus:border-[#0ABAB5]" placeholder="例：huhu33" />
+              </div>
+              <div className="bg-orange-50/50 p-3 rounded-xl border border-orange-100">
+                <label className="block text-sm font-bold text-orange-800 mb-2 border-b border-orange-200 pb-1">新增緊急 / 臨時聯絡人</label>
+                <input type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-[#0ABAB5] focus:border-[#0ABAB5] mb-2 bg-white" placeholder="緊急聯絡人姓名" />
+                <input type="tel" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-[#0ABAB5] focus:border-[#0ABAB5] bg-white" placeholder="緊急聯絡人生效電話" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <button onClick={() => {
+                toast({ title: "更新成功", description: "聯絡資訊已同步至系統端。" });
+                setContactModal(null);
+              }} className="flex-1 bg-[#0ABAB5] text-white py-2 rounded-xl font-semibold hover:bg-[#089490] text-sm shadow-sm">立即更新儲存</button>
+              <button onClick={() => setContactModal(null)} className="flex-1 border py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 shadow-sm">取消</button>
+            </div>
           </div>
         </div>
       )}

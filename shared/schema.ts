@@ -1,306 +1,716 @@
-import { pgTable, text, integer, boolean, timestamp, json, real } from "drizzle-orm/pg-core";
+import { pgTable, pgSchema, text, uuid, integer, boolean, timestamp, jsonb, real, date, time, inet, numeric, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Users table — supports 4 roles: user (elder), family, caregiver, admin
-export const users = pgTable("users", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
-  displayName: text("display_name").notNull(),
-  role: text("role").notNull().default("user"), // user | family | caregiver | admin
-  elderlyId: integer("elderly_id"), // family/caregiver links to elder's user id
-  avatar: text("avatar"),
-  age: integer("age"),
-  location: text("location"),
-  emergencyContact: text("emergency_contact"),
-  medicationReminder: text("medication_reminder"),
+// ── Reference to Supabase auth.users ──────────────────────────
+const authSchema = pgSchema("auth");
+
+export const authUsers = authSchema.table("users", {
+  id: uuid("id").primaryKey(),
 });
 
-// Conversations / Chat sessions
-export const conversations = pgTable("conversations", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  userId: integer("user_id").notNull(),
-  message: text("message").notNull(),
-  sender: text("sender").notNull(), // "user" | "ai"
-  emotionScore: integer("emotion_score"), // 1-5: 1=very sad, 5=very happy
-  riskLevel: text("risk_level"), // "green" | "yellow" | "red"
-  timestamp: timestamp("timestamp").defaultNow(),
+// ═══════════════════════════════════════════════════════════════
+// Module 1: 組織與租戶
+// ═══════════════════════════════════════════════════════════════
+
+export const organizations = pgTable("organizations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgType: text("org_type").notNull(), // individual_family, care_institution, gov_welfare_bureau
+  name: text("name").notNull(),
+  legalName: text("legal_name"),
+  taxId: text("tax_id"),
+  parentOrgId: uuid("parent_org_id").references((): any => organizations.id),
+  address: text("address"),
+  phone: text("phone"),
+  email: text("email"),
+  status: text("status").notNull().default("active"),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Emotion log — daily emotional tracking
-export const emotionLogs = pgTable("emotion_logs", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  userId: integer("user_id").notNull(),
-  date: text("date").notNull(), // YYYY-MM-DD
-  score: integer("score").notNull(), // 1-5
+export const organizationMembers = pgTable("organization_members", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+  personProfileId: uuid("person_profile_id").references(() => personProfiles.id),
+  roleCode: text("role_code").notNull(), // admin, case_manager, caregiver, family_member, gov_officer, sales, finance, support
+  title: text("title"),
+  status: text("status").notNull().default("active"),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Module 2: 使用者與身份
+// ═══════════════════════════════════════════════════════════════
+
+export const personProfiles = pgTable("person_profiles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => authUsers.id, { onDelete: "set null" }),
+  fullName: text("full_name").notNull(),
+  nickname: text("nickname"),
+  gender: text("gender"),
+  birthDate: date("birth_date"),
+  nationalIdHash: text("national_id_hash"),
+  phone: text("phone"),
+  email: text("email"),
+  address: text("address"),
+  avatarUrl: text("avatar_url"),
+  emergencyContact: jsonb("emergency_contact"),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Module 3: 照護主體與關係
+// ═══════════════════════════════════════════════════════════════
+
+export const careRecipients = pgTable("care_recipients", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  personProfileId: uuid("person_profile_id").notNull().references(() => personProfiles.id, { onDelete: "cascade" }),
+  primaryOrgId: uuid("primary_org_id").references(() => organizations.id),
+  careLevel: text("care_level"),
+  disabilityGrade: text("disability_grade"),
+  dementiaStage: text("dementia_stage"),
+  communicationStyle: text("communication_style"),
+  riskFlags: jsonb("risk_flags").default([]),
+  preferences: jsonb("preferences").default({}),
+  aiSummary: text("ai_summary"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const careRelationships = pgTable("care_relationships", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  relatedPersonId: uuid("related_person_id").references(() => personProfiles.id),
+  relatedOrgId: uuid("related_org_id").references(() => organizations.id),
+  relationshipType: text("relationship_type").notNull(),
+  permissionScope: jsonb("permission_scope").notNull().default({
+    view_profile: true,
+    view_chat: true,
+    send_message: true,
+    view_events: true,
+    manage_events: false,
+    view_health_notes: false,
+    manage_care_team: false,
+  }),
+  isPrimary: boolean("is_primary").default(false),
+  priorityLevel: integer("priority_level").default(0),
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  status: text("status").notNull().default("active"),
   notes: text("notes"),
-  hrv: integer("hrv"), // Heart Rate Variability from wearable
-  interactions: integer("interactions").default(0), // number of chats that day
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Memory bank — AI's memory of the elder
-export const memories = pgTable("memories", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  userId: integer("user_id").notNull(),
-  category: text("category").notNull(), // "family" | "food" | "hobby" | "health" | "event"
-  title: text("title").notNull(),
+export const households = pgTable("households", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull(),
+  organizationId: uuid("organization_id").references(() => organizations.id),
+  primaryContactId: uuid("primary_contact_id").references(() => personProfiles.id),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Module 4: 聊天系統
+// ═══════════════════════════════════════════════════════════════
+
+export const conversations = pgTable("conversations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id),
+  careRecipientId: uuid("care_recipient_id").references(() => careRecipients.id),
+  initiatedByUserId: uuid("initiated_by_user_id").references(() => authUsers.id),
+  channel: text("channel").notNull().default("app"),
+  conversationType: text("conversation_type").notNull().default("care_chat"),
+  title: text("title"),
+  status: text("status").notNull().default("active"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const conversationParticipants = pgTable("conversation_participants", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => authUsers.id),
+  personProfileId: uuid("person_profile_id").references(() => personProfiles.id),
+  participantRole: text("participant_role").notNull(),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const messages = pgTable("messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  senderType: text("sender_type").notNull(), // user, ai, system
+  senderUserId: uuid("sender_user_id").references(() => authUsers.id),
+  senderProfileId: uuid("sender_profile_id").references(() => personProfiles.id),
   content: text("content").notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
+  contentType: text("content_type").notNull().default("text"),
+  messageMetadata: jsonb("message_metadata").default({}),
+  aiIntent: text("ai_intent"),
+  sentimentScore: numeric("sentiment_score", { precision: 5, scale: 2 }),
+  emotionScore: integer("emotion_score"),
+  riskLevel: text("risk_level"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Risk alerts — triggered by L2/L3 detection
-export const alerts = pgTable("alerts", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  userId: integer("user_id").notNull(),
-  level: text("level").notNull(), // "yellow" | "red"
-  trigger: text("trigger").notNull(), // what triggered it
-  summary: text("summary").notNull(),
-  handled: boolean("handled").default(false),
-  handledBy: integer("handled_by"),
-  createdAt: timestamp("created_at").defaultNow(),
+// ═══════════════════════════════════════════════════════════════
+// Module 5: AI 記憶
+// ═══════════════════════════════════════════════════════════════
+
+export const memoryItems = pgTable("memory_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").references(() => careRecipients.id, { onDelete: "cascade" }),
+  conversationId: uuid("conversation_id").references(() => conversations.id),
+  sourceMessageId: uuid("source_message_id").references(() => messages.id),
+  memoryType: text("memory_type").notNull(),
+  category: text("category"),
+  key: text("key"),
+  title: text("title"),
+  valueText: text("value_text"),
+  valueJson: jsonb("value_json"),
+  importanceScore: integer("importance_score").default(0),
+  confidenceScore: numeric("confidence_score", { precision: 5, scale: 2 }),
+  validFrom: timestamp("valid_from", { withTimezone: true }),
+  validTo: timestamp("valid_to", { withTimezone: true }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: text("created_by").notNull().default("ai"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Personality settings — adjustable by caregiver/family
+export const conversationSummaries = pgTable("conversation_summaries", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  careRecipientId: uuid("care_recipient_id").references(() => careRecipients.id),
+  summaryType: text("summary_type").notNull(),
+  summaryText: text("summary_text").notNull(),
+  summaryJson: jsonb("summary_json"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const personalitySettings = pgTable("personality_settings", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  userId: integer("user_id").notNull().unique(),
-  tone: text("tone").default("warm"), // "warm" | "humorous" | "calm" | "encouraging"
-  callFrequency: text("call_frequency").default("daily"), // "daily" | "twice_daily" | "weekly"
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }).unique(),
+  tone: text("tone").default("warm"),
+  callFrequency: text("call_frequency").default("daily"),
   language: text("language").default("zh-TW"),
   specialTopics: text("special_topics").array(),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Scan records — uploaded documents (medication, appointment, events)
-export const scanRecords = pgTable("scan_records", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  elderlyId: integer("elderly_id").notNull(),
-  uploadedBy: integer("uploaded_by").notNull(), // family or caregiver user id
-  type: text("type").notNull(), // "medication" | "appointment" | "event" | "invitation"
+export const emotionLogs = pgTable("emotion_logs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  date: date("date").notNull(),
+  score: integer("score").notNull(),
+  notes: text("notes"),
+  hrv: integer("hrv"),
+  interactions: integer("interactions").default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const emotionAssessments = pgTable("emotion_assessments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").references(() => careRecipients.id),
+  assessedByUserId: uuid("assessed_by_user_id").references(() => authUsers.id),
+  assessmentDate: date("assessment_date").notNull(),
+  assessmentType: text("assessment_type").notNull().default("ai_auto"),
+  overallScore: numeric("overall_score", { precision: 5, scale: 2 }),
+  assessmentData: jsonb("assessment_data").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// Module 6: 事件與提醒
+// ═══════════════════════════════════════════════════════════════
+
+export const careEvents = pgTable("care_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  createdByUserId: uuid("created_by_user_id").references(() => authUsers.id),
+  eventType: text("event_type").notNull(),
   title: text("title").notNull(),
-  content: text("content").notNull(), // parsed/OCR text or manual input
-  imageDataUrl: text("image_data_url"), // base64 preview (demo only)
-  reminderDate: text("reminder_date"), // YYYY-MM-DD
-  reminderTime: text("reminder_time"), // HH:mm
+  description: text("description"),
+  eventStartAt: timestamp("event_start_at", { withTimezone: true }).notNull(),
+  eventEndAt: timestamp("event_end_at", { withTimezone: true }),
+  isAllDay: boolean("is_all_day").notNull().default(false),
+  priority: text("priority").notNull().default("normal"),
+  status: text("status").notNull().default("scheduled"),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const eventAssignees = pgTable("event_assignees", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  eventId: uuid("event_id").notNull().references(() => careEvents.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => authUsers.id),
+  personProfileId: uuid("person_profile_id").references(() => personProfiles.id),
+  organizationId: uuid("organization_id").references(() => organizations.id),
+  assigneeRole: text("assignee_role"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const reminders = pgTable("reminders", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  eventId: uuid("event_id").notNull().references(() => careEvents.id, { onDelete: "cascade" }),
+  reminderType: text("reminder_type").notNull(),
+  remindAt: timestamp("remind_at", { withTimezone: true }),
+  recurrenceRule: text("recurrence_rule"),
+  channel: text("channel").notNull(),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const notificationLogs = pgTable("notification_logs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  reminderId: uuid("reminder_id").references(() => reminders.id),
+  careEventId: uuid("care_event_id").references(() => careEvents.id),
+  recipientUserId: uuid("recipient_user_id").references(() => authUsers.id),
+  channel: text("channel").notNull(),
+  deliveryStatus: text("delivery_status").notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  payload: jsonb("payload"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Module 7: 照護紀錄與風險
+// ═══════════════════════════════════════════════════════════════
+
+export const careNotes = pgTable("care_notes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  authorUserId: uuid("author_user_id").references(() => authUsers.id),
+  noteType: text("note_type").notNull(),
+  noteText: text("note_text").notNull(),
+  noteJson: jsonb("note_json"),
+  visibilityLevel: text("visibility_level").notNull().default("restricted"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const healthObservations = pgTable("health_observations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  observedByUserId: uuid("observed_by_user_id").references(() => authUsers.id),
+  observationType: text("observation_type").notNull(),
+  valueText: text("value_text"),
+  valueNum: numeric("value_num", { precision: 10, scale: 2 }),
+  unit: text("unit"),
+  confidence: real("confidence"),
+  source: text("source").notNull().default("ai"),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const alerts = pgTable("alerts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  level: text("level").notNull(),
+  triggerReason: text("trigger_reason").notNull(),
+  summary: text("summary").notNull(),
+  handled: boolean("handled").default(false),
+  handledByUserId: uuid("handled_by_user_id").references(() => authUsers.id),
+  alertStatus: text("alert_status").default("open"),
+  reasonCode: text("reason_code"),
+  episodeId: uuid("episode_id"),
+  sourceRiskEventId: uuid("source_risk_event_id"),
+  ownerId: uuid("owner_id").references(() => authUsers.id),
+  slaAt: timestamp("sla_at", { withTimezone: true }),
+  escalationStage: integer("escalation_stage").default(0),
+  createdBy: text("created_by").default("system"),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  closureReason: text("closure_reason"),
+  closedByUserId: uuid("closed_by_user_id").references(() => authUsers.id),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  actionTaken: text("action_taken"),
+  outcome: text("outcome"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const riskEventLog = pgTable("risk_event_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  messageId: uuid("message_id").references(() => messages.id),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  episodeId: uuid("episode_id"),
+  inputRiskCandidate: text("input_risk_candidate"),
+  finalRiskLevel: text("final_risk_level").notNull(),
+  riskReasons: jsonb("risk_reasons"),
+  decisionSource: text("decision_source").default("rule_engine"),
+  policyTrace: jsonb("policy_trace"),
+  needsHumanReview: boolean("needs_human_review").default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const episodes = pgTable("episodes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  category: text("category").notNull(),
+  status: text("status").notNull().default("open"),
+  summary: text("summary").notNull(),
+  caregiverId: uuid("caregiver_id").references(() => authUsers.id),
+  openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+});
+
+export const tasks = pgTable("tasks", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerId: uuid("owner_id").references(() => authUsers.id),
+  ownerRole: text("owner_role").notNull(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  taskType: text("task_type").notNull(),
+  title: text("title").notNull(),
+  dueAt: timestamp("due_at", { withTimezone: true }),
+  status: text("status").notNull().default("pending"),
+  priority: text("priority").default("normal"),
+  riskLevel: text("risk_level"),
+  episodeId: uuid("episode_id").references(() => episodes.id),
+  sourceRiskEventId: uuid("source_risk_event_id").references(() => riskEventLog.id),
+  slaAt: timestamp("sla_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Module 8: 掃描與附件
+// ═══════════════════════════════════════════════════════════════
+
+export const scanRecords = pgTable("scan_records", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  uploadedByUserId: uuid("uploaded_by_user_id").notNull().references(() => authUsers.id),
+  scanType: text("scan_type").notNull(),
+  status: text("status").notNull().default("confirmed"),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  imageUrl: text("image_url"),
+  rawText: text("raw_text"),
+  aiConfidence: real("ai_confidence"),
+  aiUncertainties: jsonb("ai_uncertainties"),
+  reminderDate: date("reminder_date"),
+  reminderTime: time("reminder_time"),
   reminderNote: text("reminder_note"),
   isAcknowledged: boolean("is_acknowledged").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Households — family container (PRD §5.2)
-export const households = pgTable("households", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  name: text("name").notNull(),
-  primaryContactId: integer("primary_contact_id"),
-  status: text("status").default("active"), // active | archived
-  createdAt: timestamp("created_at").defaultNow(),
+export const attachments = pgTable("attachments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").references(() => careRecipients.id),
+  uploadedByUserId: uuid("uploaded_by_user_id").references(() => authUsers.id),
+  fileName: text("file_name").notNull(),
+  fileType: text("file_type").notNull(),
+  mimeType: text("mime_type"),
+  fileSize: integer("file_size"),
+  storagePath: text("storage_path").notNull(),
+  relatedTable: text("related_table"),
+  relatedId: uuid("related_id"),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Episodes — care event tracking (PRD §7.3)
-export const episodes = pgTable("episodes", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  personId: integer("person_id").notNull(),
-  category: text("category").notNull(), // missed_medication | loneliness | sleep | mood_decline | fall_risk | caregiver_burden
-  status: text("status").notNull().default("open"), // open | in_progress | resolved | closed
-  summary: text("summary").notNull(),
-  caregiverId: integer("caregiver_id"),
-  openedAt: timestamp("opened_at").defaultNow(),
-  closedAt: timestamp("closed_at"),
+export const webauthnCredentials = pgTable("webauthn_credentials", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+  credentialId: text("credential_id").notNull().unique(),
+  publicKey: text("public_key").notNull(),
+  counter: integer("counter").notNull().default(0),
+  transports: jsonb("transports"),
+  deviceType: text("device_type"),
+  backedUp: boolean("backed_up").default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
 });
 
-// Tasks — action items (PRD §5.2)
-export const tasks = pgTable("tasks", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  ownerId: integer("owner_id"), // who is assigned
-  ownerRole: text("owner_role").notNull(), // family_primary | caregiver | admin
-  personId: integer("person_id").notNull(), // which care subject
-  type: text("type").notNull(), // family_callback | medication_check | visit | follow_up | appointment
-  title: text("title").notNull(),
-  dueAt: text("due_at"), // ISO date string
-  status: text("status").notNull().default("pending"), // pending | claimed | completed | cancelled
-  priority: text("priority").default("normal"), // low | normal | high | urgent
-  createdAt: timestamp("created_at").defaultNow(),
-  completedAt: timestamp("completed_at"),
-});
+// ═══════════════════════════════════════════════════════════════
+// Module 9: SaaS 帳務
+// ═══════════════════════════════════════════════════════════════
 
-// Audit Logs — append-only access trail (PRD §6)
-export const auditLogs = pgTable("audit_logs", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  actorId: integer("actor_id").notNull(),
-  actorRole: text("actor_role").notNull(),
-  action: text("action").notNull(), // view | export | update | create | delete | login | alert_handle
-  objectType: text("object_type").notNull(), // conversation | alert | person | episode | task | scan_record
-  objectId: text("object_id"),
-  detail: text("detail"),
-  ip: text("ip"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-// Insert schemas
-export const insertUserSchema = createInsertSchema(users);
-export const insertConversationSchema = createInsertSchema(conversations).omit({ timestamp: true });
-export const insertEmotionLogSchema = createInsertSchema(emotionLogs);
-export const insertMemorySchema = createInsertSchema(memories).omit({ createdAt: true });
-export const insertAlertSchema = createInsertSchema(alerts).omit({ createdAt: true });
-export const insertPersonalitySettingsSchema = createInsertSchema(personalitySettings);
-export const insertScanRecordSchema = createInsertSchema(scanRecords).omit({ createdAt: true });
-export const insertHouseholdSchema = createInsertSchema(households).omit({ createdAt: true });
-export const insertEpisodeSchema = createInsertSchema(episodes).omit({ openedAt: true });
-export const insertTaskSchema = createInsertSchema(tasks).omit({ createdAt: true, completedAt: true });
-export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ createdAt: true });
-
-// Types
-export type User = typeof users.$inferSelect;
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type Conversation = typeof conversations.$inferSelect;
-export type InsertConversation = z.infer<typeof insertConversationSchema>;
-export type EmotionLog = typeof emotionLogs.$inferSelect;
-export type InsertEmotionLog = z.infer<typeof insertEmotionLogSchema>;
-export type Memory = typeof memories.$inferSelect;
-export type InsertMemory = z.infer<typeof insertMemorySchema>;
-export type Alert = typeof alerts.$inferSelect;
-export type InsertAlert = z.infer<typeof insertAlertSchema>;
-export type PersonalitySettings = typeof personalitySettings.$inferSelect;
-export type InsertPersonalitySettings = z.infer<typeof insertPersonalitySettingsSchema>;
-export type ScanRecord = typeof scanRecords.$inferSelect;
-export type InsertScanRecord = z.infer<typeof insertScanRecordSchema>;
-export type Household = typeof households.$inferSelect;
-export type InsertHousehold = z.infer<typeof insertHouseholdSchema>;
-export type Episode = typeof episodes.$inferSelect;
-export type InsertEpisode = z.infer<typeof insertEpisodeSchema>;
-export type Task = typeof tasks.$inferSelect;
-export type InsertTask = z.infer<typeof insertTaskSchema>;
-export type AuditLog = typeof auditLogs.$inferSelect;
-export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
-
-// ── Staff (internal company users) ──────────────────────────
-export const staff = pgTable("staff", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
-  displayName: text("display_name").notNull(),
-  role: text("role").notNull(), // "superadmin" | "sales" | "finance" | "support"
-  email: text("email").notNull(),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
-
-export const insertStaffSchema = createInsertSchema(staff).omit({ createdAt: true });
-export type InsertStaff = z.infer<typeof insertStaffSchema>;
-export type Staff = typeof staff.$inferSelect;
-
-// ── Clients (buying organisations / social welfare orgs / individuals) ──
-export const clients = pgTable("clients", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  clientType: text("client_type").notNull(), // "institution" | "social_welfare" | "individual"
-  orgName: text("org_name"),          // 機構/社會局名稱
-  contactName: text("contact_name").notNull(),
-  contactEmail: text("contact_email").notNull().unique(),
-  contactPhone: text("contact_phone"),
-  taxId: text("tax_id"),              // 統一編號
-  address: text("address"),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
-  status: text("status").notNull().default("pending"), // "pending"|"active"|"suspended"|"cancelled"
-  notes: text("notes"),
-  assignedTo: integer("assigned_to"),  // staff id
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  activatedAt: timestamp("activated_at"),
-});
-
-export const insertClientSchema = createInsertSchema(clients).omit({ createdAt: true, activatedAt: true });
-export type InsertClient = z.infer<typeof insertClientSchema>;
-export type Client = typeof clients.$inferSelect;
-
-// ── Plans (service tiers) ────────────────────────────────────
 export const plans = pgTable("plans", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
   monthlyPrice: real("monthly_price").notNull(),
   annualPrice: real("annual_price").notNull(),
   maxElders: integer("max_elders").notNull(),
-  features: text("features").notNull(), // JSON string array
+  features: jsonb("features").notNull().default([]),
   isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const insertPlanSchema = createInsertSchema(plans);
-export type InsertPlan = z.infer<typeof insertPlanSchema>;
-export type Plan = typeof plans.$inferSelect;
-
-// ── Subscriptions ────────────────────────────────────────────
 export const subscriptions = pgTable("subscriptions", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  clientId: integer("client_id").notNull(),
-  planId: integer("plan_id").notNull(),
-  billingCycle: text("billing_cycle").notNull(), // "monthly" | "annual"
-  status: text("status").notNull().default("active"), // "active"|"expired"|"cancelled"|"trial"
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  planId: uuid("plan_id").notNull().references(() => plans.id),
+  billingCycle: text("billing_cycle").notNull(),
+  status: text("status").notNull().default("active"),
   elderCount: integer("elder_count").notNull().default(1),
-  startDate: text("start_date").notNull(),
-  endDate: text("end_date").notNull(),
-  nextBillingDate: text("next_billing_date").notNull(),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
+  nextBillingDate: date("next_billing_date").notNull(),
   amount: real("amount").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({ createdAt: true });
-export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
-export type Subscription = typeof subscriptions.$inferSelect;
-
-// ── Invoices ─────────────────────────────────────────────────
 export const invoices = pgTable("invoices", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  id: uuid("id").defaultRandom().primaryKey(),
   invoiceNo: text("invoice_no").notNull().unique(),
-  clientId: integer("client_id").notNull(),
-  subscriptionId: integer("subscription_id"),
-  issueDate: text("issue_date").notNull(),
-  dueDate: text("due_date").notNull(),
-  periodStart: text("period_start").notNull(),
-  periodEnd: text("period_end").notNull(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  subscriptionId: uuid("subscription_id").references(() => subscriptions.id),
+  issueDate: date("issue_date").notNull(),
+  dueDate: date("due_date").notNull(),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
   subtotal: real("subtotal").notNull(),
   tax: real("tax").notNull().default(0),
   total: real("total").notNull(),
-  status: text("status").notNull().default("unpaid"), // "unpaid"|"paid"|"overdue"|"cancelled"
+  status: text("status").notNull().default("unpaid"),
   notes: text("notes"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const insertInvoiceSchema = createInsertSchema(invoices).omit({ createdAt: true });
-export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
-export type Invoice = typeof invoices.$inferSelect;
-
-// ── Payments ─────────────────────────────────────────────────
 export const payments = pgTable("payments", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  invoiceId: integer("invoice_id").notNull(),
-  clientId: integer("client_id").notNull(),
+  id: uuid("id").defaultRandom().primaryKey(),
+  invoiceId: uuid("invoice_id").notNull().references(() => invoices.id),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
   amount: real("amount").notNull(),
-  method: text("method").notNull(), // "newebpay"|"ecpay"|"stripe"|"bank_transfer"|"manual"
-  status: text("status").notNull().default("pending"), // "pending"|"success"|"failed"|"refunded"
+  method: text("method").notNull(),
+  status: text("status").notNull().default("pending"),
   transactionId: text("transaction_id"),
-  paidAt: timestamp("paid_at"),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
   notes: text("notes"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const insertPaymentSchema = createInsertSchema(payments).omit({ createdAt: true });
-export type InsertPayment = z.infer<typeof insertPaymentSchema>;
-export type Payment = typeof payments.$inferSelect;
-
-// ── Service Records (usage logs) ─────────────────────────────
 export const serviceRecords = pgTable("service_records", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
-  clientId: integer("client_id").notNull(),
-  subscriptionId: integer("subscription_id").notNull(),
-  month: text("month").notNull(), // "2026-03"
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  subscriptionId: uuid("subscription_id").notNull().references(() => subscriptions.id),
+  month: text("month").notNull(),
   elderCount: integer("elder_count").notNull(),
   conversationCount: integer("conversation_count").notNull().default(0),
   alertCount: integer("alert_count").notNull().default(0),
   activeElders: integer("active_elders").notNull().default(0),
   notes: text("notes"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const insertServiceRecordSchema = createInsertSchema(serviceRecords).omit({ createdAt: true });
-export type InsertServiceRecord = z.infer<typeof insertServiceRecordSchema>;
+// ═══════════════════════════════════════════════════════════════
+// Module 10: 稽核與進階
+// ═══════════════════════════════════════════════════════════════
+
+export const auditLogs = pgTable("audit_logs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  actorUserId: uuid("actor_user_id").references(() => authUsers.id),
+  actorRole: text("actor_role").notNull(),
+  actionType: text("action_type").notNull(),
+  targetTable: text("target_table").notNull(),
+  targetId: uuid("target_id"),
+  organizationId: uuid("organization_id").references(() => organizations.id),
+  careRecipientId: uuid("care_recipient_id").references(() => careRecipients.id),
+  changeSummary: jsonb("change_summary"),
+  detail: text("detail"),
+  ipAddress: text("ip_address"), // Using text instead of inet for Drizzle compatibility
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const carePlans = pgTable("care_plans", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  createdByUserId: uuid("created_by_user_id").references(() => authUsers.id),
+  planType: text("plan_type").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  goals: jsonb("goals").default([]),
+  schedule: jsonb("schedule").default({}),
+  status: text("status").notNull().default("active"),
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const benefitCases = pgTable("benefit_cases", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  organizationId: uuid("organization_id").references(() => organizations.id),
+  caseOfficerId: uuid("case_officer_id").references(() => authUsers.id),
+  caseType: text("case_type").notNull(),
+  caseNumber: text("case_number"),
+  status: text("status").notNull().default("pending"),
+  appliedAt: date("applied_at"),
+  approvedAt: date("approved_at"),
+  expiresAt: date("expires_at"),
+  benefitAmount: real("benefit_amount"),
+  benefitDetails: jsonb("benefit_details").default({}),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const aiRiskAlerts = pgTable("ai_risk_alerts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  careRecipientId: uuid("care_recipient_id").notNull().references(() => careRecipients.id, { onDelete: "cascade" }),
+  alertType: text("alert_type").notNull(),
+  severity: text("severity").notNull(),
+  confidenceScore: numeric("confidence_score", { precision: 5, scale: 2 }),
+  description: text("description").notNull(),
+  recommendation: text("recommendation"),
+  sourceData: jsonb("source_data").default({}),
+  status: text("status").notNull().default("pending"),
+  reviewedByUserId: uuid("reviewed_by_user_id").references(() => authUsers.id),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Insert Schemas (Zod validation)
+// ═══════════════════════════════════════════════════════════════
+
+export const insertOrganizationSchema = createInsertSchema(organizations).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertPersonProfileSchema = createInsertSchema(personProfiles).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertOrganizationMemberSchema = createInsertSchema(organizationMembers).omit({ id: true, joinedAt: true });
+export const insertCareRecipientSchema = createInsertSchema(careRecipients).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertCareRelationshipSchema = createInsertSchema(careRelationships).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertHouseholdSchema = createInsertSchema(households).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertConversationSchema = createInsertSchema(conversations).omit({ id: true, createdAt: true, startedAt: true });
+export const insertConversationParticipantSchema = createInsertSchema(conversationParticipants).omit({ id: true, joinedAt: true });
+export const insertMessageSchema = createInsertSchema(messages).omit({ id: true, createdAt: true });
+export const insertMemoryItemSchema = createInsertSchema(memoryItems).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertConversationSummarySchema = createInsertSchema(conversationSummaries).omit({ id: true, createdAt: true });
+export const insertPersonalitySettingsSchema = createInsertSchema(personalitySettings).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertEmotionAssessmentSchema = createInsertSchema(emotionAssessments).omit({ id: true, createdAt: true });
+export const insertEmotionLogSchema = createInsertSchema(emotionLogs).omit({ id: true, createdAt: true });
+export const insertCareEventSchema = createInsertSchema(careEvents).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertEventAssigneeSchema = createInsertSchema(eventAssignees).omit({ id: true, createdAt: true });
+export const insertReminderSchema = createInsertSchema(reminders).omit({ id: true, createdAt: true });
+export const insertNotificationLogSchema = createInsertSchema(notificationLogs).omit({ id: true, createdAt: true });
+export const insertCareNoteSchema = createInsertSchema(careNotes).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertHealthObservationSchema = createInsertSchema(healthObservations).omit({ id: true, createdAt: true });
+export const insertAlertSchema = createInsertSchema(alerts).omit({ id: true, createdAt: true });
+export const insertRiskEventSchema = createInsertSchema(riskEventLog).omit({ id: true, createdAt: true });
+export const insertEpisodeSchema = createInsertSchema(episodes).omit({ id: true, openedAt: true });
+export const insertTaskSchema = createInsertSchema(tasks).omit({ id: true, createdAt: true, completedAt: true });
+export const insertScanRecordSchema = createInsertSchema(scanRecords).omit({ id: true, createdAt: true });
+export const insertAttachmentSchema = createInsertSchema(attachments).omit({ id: true, createdAt: true });
+export const insertWebAuthnCredentialSchema = createInsertSchema(webauthnCredentials).omit({ id: true, createdAt: true });
+export const insertPlanSchema = createInsertSchema(plans).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({ id: true, createdAt: true });
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, createdAt: true });
+export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true, createdAt: true });
+export const insertServiceRecordSchema = createInsertSchema(serviceRecords).omit({ id: true, createdAt: true });
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, createdAt: true });
+export const insertCarePlanSchema = createInsertSchema(carePlans).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertBenefitCaseSchema = createInsertSchema(benefitCases).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertAiRiskAlertSchema = createInsertSchema(aiRiskAlerts).omit({ id: true, createdAt: true });
+
+// ═══════════════════════════════════════════════════════════════
+// TypeScript Types
+// ═══════════════════════════════════════════════════════════════
+
+// Module 1: 組織
+export type Organization = typeof organizations.$inferSelect;
+export type InsertOrganization = z.infer<typeof insertOrganizationSchema>;
+export type OrganizationMember = typeof organizationMembers.$inferSelect;
+export type InsertOrganizationMember = z.infer<typeof insertOrganizationMemberSchema>;
+
+// Module 2: 身份
+export type PersonProfile = typeof personProfiles.$inferSelect;
+export type InsertPersonProfile = z.infer<typeof insertPersonProfileSchema>;
+
+// Module 3: 照護
+export type CareRecipient = typeof careRecipients.$inferSelect;
+export type InsertCareRecipient = z.infer<typeof insertCareRecipientSchema>;
+export type CareRelationship = typeof careRelationships.$inferSelect;
+export type InsertCareRelationship = z.infer<typeof insertCareRelationshipSchema>;
+export type Household = typeof households.$inferSelect;
+export type InsertHousehold = z.infer<typeof insertHouseholdSchema>;
+
+// Module 4: 聊天
+export type Conversation = typeof conversations.$inferSelect;
+export type InsertConversation = z.infer<typeof insertConversationSchema>;
+export type ConversationParticipant = typeof conversationParticipants.$inferSelect;
+export type InsertConversationParticipant = z.infer<typeof insertConversationParticipantSchema>;
+export type Message = typeof messages.$inferSelect;
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
+
+// Module 5: AI 記憶
+export type MemoryItem = typeof memoryItems.$inferSelect;
+export type InsertMemoryItem = z.infer<typeof insertMemoryItemSchema>;
+export type ConversationSummary = typeof conversationSummaries.$inferSelect;
+export type InsertConversationSummary = z.infer<typeof insertConversationSummarySchema>;
+export type PersonalitySettings = typeof personalitySettings.$inferSelect;
+export type InsertPersonalitySettings = z.infer<typeof insertPersonalitySettingsSchema>;
+export type EmotionLog = typeof emotionLogs.$inferSelect;
+export type EmotionAssessment = typeof emotionAssessments.$inferSelect;
+export type InsertEmotionAssessment = z.infer<typeof insertEmotionAssessmentSchema>;
+export type InsertEmotionLog = z.infer<typeof insertEmotionLogSchema>;
+
+// Module 6: 事件
+export type CareEvent = typeof careEvents.$inferSelect;
+export type InsertCareEvent = z.infer<typeof insertCareEventSchema>;
+export type EventAssignee = typeof eventAssignees.$inferSelect;
+export type InsertEventAssignee = z.infer<typeof insertEventAssigneeSchema>;
+export type Reminder = typeof reminders.$inferSelect;
+export type InsertReminder = z.infer<typeof insertReminderSchema>;
+export type NotificationLog = typeof notificationLogs.$inferSelect;
+export type InsertNotificationLog = z.infer<typeof insertNotificationLogSchema>;
+
+// Module 7: 照護紀錄
+export type CareNote = typeof careNotes.$inferSelect;
+export type InsertCareNote = z.infer<typeof insertCareNoteSchema>;
+export type HealthObservation = typeof healthObservations.$inferSelect;
+export type InsertHealthObservation = z.infer<typeof insertHealthObservationSchema>;
+export type Alert = typeof alerts.$inferSelect;
+export type InsertAlert = z.infer<typeof insertAlertSchema>;
+export type RiskEvent = typeof riskEventLog.$inferSelect;
+export type InsertRiskEvent = z.infer<typeof insertRiskEventSchema>;
+export type Episode = typeof episodes.$inferSelect;
+export type InsertEpisode = z.infer<typeof insertEpisodeSchema>;
+export type Task = typeof tasks.$inferSelect;
+export type InsertTask = z.infer<typeof insertTaskSchema>;
+
+// Module 8: 掃描與附件
+export type ScanRecord = typeof scanRecords.$inferSelect;
+export type InsertScanRecord = z.infer<typeof insertScanRecordSchema>;
+export type Attachment = typeof attachments.$inferSelect;
+export type InsertAttachment = z.infer<typeof insertAttachmentSchema>;
+export type WebAuthnCredential = typeof webauthnCredentials.$inferSelect;
+export type InsertWebAuthnCredential = z.infer<typeof insertWebAuthnCredentialSchema>;
+
+// Module 9: SaaS 帳務
+export type Plan = typeof plans.$inferSelect;
+export type InsertPlan = z.infer<typeof insertPlanSchema>;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+export type Payment = typeof payments.$inferSelect;
+export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type ServiceRecord = typeof serviceRecords.$inferSelect;
+export type InsertServiceRecord = z.infer<typeof insertServiceRecordSchema>;
+
+// Module 10: 稽核與進階
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type CarePlan = typeof carePlans.$inferSelect;
+export type InsertCarePlan = z.infer<typeof insertCarePlanSchema>;
+export type BenefitCase = typeof benefitCases.$inferSelect;
+export type InsertBenefitCase = z.infer<typeof insertBenefitCaseSchema>;
+export type AiRiskAlert = typeof aiRiskAlerts.$inferSelect;
+export type InsertAiRiskAlert = z.infer<typeof insertAiRiskAlertSchema>;

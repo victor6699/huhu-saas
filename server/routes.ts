@@ -1,66 +1,41 @@
 import type { Express } from "express";
 import type { Server } from "http";
-import session from "express-session";
-import MemoryStore from "memorystore";
 import { z } from "zod";
-import { storage } from "./storage";
+import { extractUser, requireAuth, requireStaff, supabaseAdmin } from "./auth-middleware";
 
-declare module "express-session" {
-  interface SessionData {
-    staffId?: number;
-    clientId?: number;
-    role?: string;
-  }
-}
+// ═══════════════════════════════════════════════════════════════
+// Validation Schemas
+// ═══════════════════════════════════════════════════════════════
 
-const loginSchema = z.object({
-  username: z.string().trim().min(1, "請輸入帳號"),
-  password: z.string().min(1, "請輸入密碼"),
-});
-
-const createClientPayloadSchema = z.object({
-  clientType: z.enum(["institution", "social_welfare", "individual"]),
-  orgName: z.string().trim().nullable().optional(),
-  contactName: z.string().trim().min(1, "請輸入聯絡人姓名"),
-  contactEmail: z.string().trim().email("Email 格式不正確"),
-  contactPhone: z.string().trim().nullable().optional(),
+const createOrganizationSchema = z.object({
+  orgType: z.enum(["individual_family", "care_institution", "gov_welfare_bureau"]),
+  name: z.string().trim().min(1, "請填寫機構名稱"),
+  legalName: z.string().trim().nullable().optional(),
   taxId: z.string().trim().nullable().optional(),
   address: z.string().trim().nullable().optional(),
-  username: z.string().trim().min(3, "帳號至少需要 3 碼"),
-  password: z.string().min(6, "密碼至少需要 6 碼"),
-  status: z.enum(["pending", "active", "suspended", "cancelled"]).default("pending"),
-  notes: z.string().trim().nullable().optional(),
-  assignedTo: z.number().int().positive().nullable().optional(),
-});
-
-const createStaffPayloadSchema = z.object({
-  username: z.string().trim().min(3, "帳號至少需要 3 碼"),
-  password: z.string().min(6, "密碼至少需要 6 碼"),
-  displayName: z.string().trim().min(1, "請輸入姓名"),
-  role: z.enum(["superadmin", "sales", "finance", "support"]),
-  email: z.string().trim().email("Email 格式不正確"),
-  isActive: z.boolean().optional(),
+  phone: z.string().trim().nullable().optional(),
+  email: z.string().trim().email().nullable().optional(),
 });
 
 const createSubscriptionPayloadSchema = z.object({
-  clientId: z.coerce.number().int().positive(),
-  planId: z.coerce.number().int().positive(),
+  organizationId: z.string().uuid(),
+  planId: z.string().uuid(),
   billingCycle: z.enum(["monthly", "annual"]),
   status: z.enum(["active", "expired", "cancelled", "trial"]).default("active"),
   elderCount: z.coerce.number().int().positive(),
-  startDate: z.string().trim().min(1, "請輸入起始日"),
-  endDate: z.string().trim().min(1, "請輸入結束日"),
-  nextBillingDate: z.string().trim().min(1, "請輸入下次扣款日"),
+  startDate: z.string().trim().min(1, "請填開始日"),
+  endDate: z.string().trim().min(1, "請填結束日"),
+  nextBillingDate: z.string().trim().min(1, "請填下次扣款日"),
   amount: z.coerce.number().nonnegative(),
 });
 
 const createInvoicePayloadSchema = z.object({
-  clientId: z.coerce.number().int().positive(),
-  subscriptionId: z.coerce.number().int().positive().nullable().optional(),
-  issueDate: z.string().trim().min(1, "請輸入開立日期"),
-  dueDate: z.string().trim().min(1, "請輸入到期日"),
-  periodStart: z.string().trim().min(1, "請輸入計費起始日"),
-  periodEnd: z.string().trim().min(1, "請輸入計費結束日"),
+  organizationId: z.string().uuid(),
+  subscriptionId: z.string().uuid().nullable().optional(),
+  issueDate: z.string().trim().min(1),
+  dueDate: z.string().trim().min(1),
+  periodStart: z.string().trim().min(1),
+  periodEnd: z.string().trim().min(1),
   subtotal: z.coerce.number().nonnegative(),
   tax: z.coerce.number().nonnegative(),
   total: z.coerce.number().nonnegative(),
@@ -69,515 +44,299 @@ const createInvoicePayloadSchema = z.object({
 });
 
 const createPaymentPayloadSchema = z.object({
-  invoiceId: z.coerce.number().int().positive(),
-  clientId: z.coerce.number().int().positive(),
+  invoiceId: z.string().uuid(),
+  organizationId: z.string().uuid(),
   amount: z.coerce.number().positive(),
   method: z.enum(["newebpay", "ecpay", "stripe", "bank_transfer", "manual"]),
   status: z.enum(["pending", "success", "failed", "refunded"]).default("pending"),
   transactionId: z.string().trim().nullable().optional(),
-  paidAt: z.date().nullable().optional(),
   notes: z.string().trim().nullable().optional(),
 });
-
-const portalPaymentSchema = z.object({
-  invoiceId: z.coerce.number().int().positive(),
-  method: z.enum(["newebpay", "ecpay", "stripe", "bank_transfer", "manual"]),
-});
-
-const normalizeNullableText = (value?: string | null) => {
-  if (value == null) {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
 
 const parsePayload = <T>(schema: z.ZodType<T>, payload: unknown) => {
   const parsed = schema.safeParse(payload);
   if (!parsed.success) {
-    return {
-      ok: false as const,
-      message: parsed.error.issues[0]?.message ?? "資料格式不正確",
-    };
+    return { ok: false as const, message: parsed.error.issues[0]?.message ?? "資料格式錯誤" };
   }
-
   return { ok: true as const, data: parsed.data };
 };
 
+// ═══════════════════════════════════════════════════════════════
+// Routes
+// ═══════════════════════════════════════════════════════════════
+
 export async function registerRoutes(_httpServer: Server, app: Express) {
-  const MStore = MemoryStore(session);
-  app.use(session({
-    secret: "huhu-saas-secret-2026",
-    resave: false,
-    saveUninitialized: false,
-    store: new MStore({ checkPeriod: 86400000 }),
-    cookie: { maxAge: 86400000 },
-  }));
+  // Apply Supabase auth middleware globally
+  app.use(extractUser);
 
-  const assertClientUniqueness = async (username: string, email: string) => {
-    const [existingByUsername, existingByEmail] = await Promise.all([
-      storage.getClientByUsername(username),
-      storage.getClientByEmail(email),
-    ]);
+  // ── Auth ────────────────────────────────────────────────────
+  app.get("/api/me", requireAuth, async (req, res) => {
+    const userId = req.supabaseUser!.id;
 
-    if (existingByUsername) {
-      return { status: 409, message: "這個帳號已經被使用" };
-    }
+    // Get person profile
+    const { data: profile } = await supabaseAdmin
+      .from("person_profiles")
+      .select("*")
+      .eq("user_id", userId)
+      .single();
 
-    if (existingByEmail) {
-      return { status: 409, message: "這個 Email 已經被使用" };
-    }
+    // Get organization memberships
+    const { data: memberships } = await supabaseAdmin
+      .from("organization_members")
+      .select("organization_id, role_code, title, organizations(name, org_type)")
+      .eq("user_id", userId)
+      .eq("status", "active");
 
-    return null;
-  };
-
-  const assertStaffUniqueness = async (username: string) => {
-    const existing = await storage.getStaffByUsername(username);
-    if (existing) {
-      return { status: 409, message: "這個員工帳號已經存在" };
-    }
-
-    return null;
-  };
-
-  const requireStaff = (req: any, res: any, next: any) => {
-    if (!req.session.staffId) {
-      return res.status(401).json({ message: "請先登入後台帳號" });
-    }
-
-    next();
-  };
-
-  const requireClient = (req: any, res: any, next: any) => {
-    if (!req.session.clientId) {
-      return res.status(401).json({ message: "請先登入客戶帳號" });
-    }
-
-    next();
-  };
-
-  app.post("/api/staff/login", async (req, res) => {
-    const parsed = parsePayload(loginSchema, req.body);
-    if (!parsed.ok) {
-      return res.status(400).json({ message: parsed.message });
-    }
-
-    const staff = await storage.getStaffByUsername(parsed.data.username);
-    if (!staff || staff.password !== parsed.data.password || !staff.isActive) {
-      return res.status(401).json({ message: "帳號或密碼錯誤" });
-    }
-
-    req.session.staffId = staff.id;
-    req.session.role = "staff";
-    res.json({ id: staff.id, displayName: staff.displayName, role: staff.role, username: staff.username });
-  });
-
-  app.post("/api/client/login", async (req, res) => {
-    const parsed = parsePayload(loginSchema, req.body);
-    if (!parsed.ok) {
-      return res.status(400).json({ message: parsed.message });
-    }
-
-    const client = await storage.getClientByUsername(parsed.data.username);
-    if (!client || client.password !== parsed.data.password) {
-      return res.status(401).json({ message: "帳號或密碼錯誤" });
-    }
-
-    if (client.status === "suspended") {
-      return res.status(403).json({ message: "帳號已停用，請聯繫客服" });
-    }
-
-    req.session.clientId = client.id;
-    req.session.role = "client";
     res.json({
-      id: client.id,
-      orgName: client.orgName,
-      contactName: client.contactName,
-      clientType: client.clientType,
-      status: client.status,
+      id: userId,
+      email: req.supabaseUser!.email,
+      profile,
+      memberships: memberships || [],
+      role: req.supabaseUser!.role,
     });
   });
 
-  app.post("/api/client/register", async (req, res) => {
-    const parsed = parsePayload(createClientPayloadSchema, {
-      ...req.body,
-      orgName: normalizeNullableText(req.body?.orgName),
-      contactPhone: normalizeNullableText(req.body?.contactPhone),
-      taxId: normalizeNullableText(req.body?.taxId),
-      address: normalizeNullableText(req.body?.address),
-      notes: null,
-      assignedTo: null,
-      status: "pending",
+  app.post("/api/logout", async (req, res) => {
+    // Client-side handles signOut; this is a no-op endpoint for backward compatibility
+    res.json({ ok: true });
+  });
+
+  // ── Organizations ──────────────────────────────────────────
+  app.get("/api/organizations", requireAuth, async (req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("organizations")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
+  app.post("/api/organizations", requireAuth, async (req, res) => {
+    const parsed = parsePayload(createOrganizationSchema, req.body);
+    if (!parsed.ok) return res.status(400).json({ message: parsed.message });
+
+    const { data, error } = await supabaseAdmin
+      .from("organizations")
+      .insert(parsed.data)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ message: error.message });
+
+    // Auto-add the creator as admin
+    await supabaseAdmin.from("organization_members").insert({
+      organization_id: data.id,
+      user_id: req.supabaseUser!.id,
+      role_code: "admin",
     });
 
-    if (!parsed.ok) {
-      return res.status(400).json({ message: parsed.message });
-    }
-
-    const duplicate = await assertClientUniqueness(parsed.data.username, parsed.data.contactEmail);
-    if (duplicate) {
-      return res.status(duplicate.status).json({ message: duplicate.message });
-    }
-
-    const client = await storage.createClient(parsed.data);
-    res.json({ id: client.id, message: "申請已送出，等待後台審核開通" });
+    res.json(data);
   });
 
-  app.post("/api/logout", (req, res) => {
-    req.session.destroy(() => {
-      res.clearCookie("connect.sid");
-      res.json({ ok: true });
-    });
+  // ── Organization Members ───────────────────────────────────
+  app.get("/api/organizations/:orgId/members", requireAuth, async (req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("organization_members")
+      .select("*, person_profiles(full_name, email, avatar_url)")
+      .eq("organization_id", req.params.orgId);
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.get("/api/me", async (req, res) => {
-    if (req.session.staffId) {
-      const staff = await storage.getStaff(req.session.staffId);
-      if (!staff) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      return res.json({ type: "staff", id: staff.id, displayName: staff.displayName, role: staff.role, username: staff.username });
-    }
-
-    if (req.session.clientId) {
-      const client = await storage.getClient(req.session.clientId);
-      if (!client) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      return res.json({
-        type: "client",
-        id: client.id,
-        orgName: client.orgName,
-        contactName: client.contactName,
-        clientType: client.clientType,
-        status: client.status,
-      });
-    }
-
-    res.status(401).json({ message: "Unauthorized" });
-  });
-
+  // ── Plans ──────────────────────────────────────────────────
   app.get("/api/plans", async (_req, res) => {
-    const plans = await storage.getAllPlans();
-    res.json(plans.filter((plan) => plan.isActive));
+    const { data, error } = await supabaseAdmin
+      .from("plans")
+      .select("*")
+      .eq("is_active", true)
+      .order("monthly_price");
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.get("/api/staff/clients", requireStaff, async (_req, res) => {
-    res.json(await storage.getAllClients());
+  // ── Subscriptions ──────────────────────────────────────────
+  app.get("/api/subscriptions", requireAuth, async (_req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("subscriptions")
+      .select("*, organizations(name), plans(name)")
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.get("/api/staff/clients/:id", requireStaff, async (req, res) => {
-    const client = await storage.getClient(Number(req.params.id));
-    if (!client) {
-      return res.status(404).json({ message: "找不到客戶" });
-    }
-
-    res.json(client);
-  });
-
-  app.post("/api/staff/clients", requireStaff, async (req, res) => {
-    const parsed = parsePayload(createClientPayloadSchema, {
-      ...req.body,
-      orgName: normalizeNullableText(req.body?.orgName),
-      contactPhone: normalizeNullableText(req.body?.contactPhone),
-      taxId: normalizeNullableText(req.body?.taxId),
-      address: normalizeNullableText(req.body?.address),
-      notes: normalizeNullableText(req.body?.notes),
-      assignedTo: req.body?.assignedTo ? Number(req.body.assignedTo) : null,
-      status: req.body?.status ?? "pending",
-    });
-
-    if (!parsed.ok) {
-      return res.status(400).json({ message: parsed.message });
-    }
-
-    const duplicate = await assertClientUniqueness(parsed.data.username, parsed.data.contactEmail);
-    if (duplicate) {
-      return res.status(duplicate.status).json({ message: duplicate.message });
-    }
-
-    if (parsed.data.assignedTo != null) {
-      const staff = await storage.getStaff(parsed.data.assignedTo);
-      if (!staff) {
-        return res.status(404).json({ message: "指定的員工不存在" });
-      }
-    }
-
-    const client = await storage.createClient(parsed.data);
-    res.json(client);
-  });
-
-  app.patch("/api/staff/clients/:id", requireStaff, async (req, res) => {
-    const client = await storage.updateClient(Number(req.params.id), req.body);
-    if (!client) {
-      return res.status(404).json({ message: "找不到客戶" });
-    }
-
-    res.json(client);
-  });
-
-  app.post("/api/staff/clients/:id/activate", requireStaff, async (req, res) => {
-    const client = await storage.updateClient(Number(req.params.id), { status: "active", activatedAt: new Date() });
-    if (!client) {
-      return res.status(404).json({ message: "找不到客戶" });
-    }
-
-    res.json(client);
-  });
-
-  app.post("/api/staff/clients/:id/suspend", requireStaff, async (req, res) => {
-    const client = await storage.updateClient(Number(req.params.id), { status: "suspended" });
-    if (!client) {
-      return res.status(404).json({ message: "找不到客戶" });
-    }
-
-    res.json(client);
-  });
-
-  app.get("/api/staff/members", requireStaff, async (_req, res) => {
-    const all = await storage.getAllStaff();
-    res.json(all.map((staff) => ({ ...staff, password: undefined })));
-  });
-
-  app.post("/api/staff/members", requireStaff, async (req, res) => {
-    const parsed = parsePayload(createStaffPayloadSchema, req.body);
-    if (!parsed.ok) {
-      return res.status(400).json({ message: parsed.message });
-    }
-
-    const duplicate = await assertStaffUniqueness(parsed.data.username);
-    if (duplicate) {
-      return res.status(duplicate.status).json({ message: duplicate.message });
-    }
-
-    const staff = await storage.createStaff({
-      ...parsed.data,
-      isActive: parsed.data.isActive ?? true,
-    });
-    res.json({ ...staff, password: undefined });
-  });
-
-  app.get("/api/staff/subscriptions", requireStaff, async (_req, res) => {
-    res.json(await storage.getAllSubscriptions());
-  });
-
-  app.post("/api/staff/subscriptions", requireStaff, async (req, res) => {
+  app.post("/api/subscriptions", requireAuth, async (req, res) => {
     const parsed = parsePayload(createSubscriptionPayloadSchema, req.body);
-    if (!parsed.ok) {
-      return res.status(400).json({ message: parsed.message });
-    }
+    if (!parsed.ok) return res.status(400).json({ message: parsed.message });
 
-    const [client, plan] = await Promise.all([
-      storage.getClient(parsed.data.clientId),
-      storage.getPlan(parsed.data.planId),
-    ]);
+    const { data, error } = await supabaseAdmin
+      .from("subscriptions")
+      .insert(parsed.data)
+      .select()
+      .single();
 
-    if (!client) {
-      return res.status(404).json({ message: "找不到客戶" });
-    }
-
-    if (!plan) {
-      return res.status(404).json({ message: "找不到方案" });
-    }
-
-    const subscription = await storage.createSubscription(parsed.data);
-    res.json(subscription);
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.patch("/api/staff/subscriptions/:id", requireStaff, async (req, res) => {
-    const subscription = await storage.updateSubscription(Number(req.params.id), req.body);
-    if (!subscription) {
-      return res.status(404).json({ message: "找不到訂閱" });
-    }
+  // ── Invoices ───────────────────────────────────────────────
+  app.get("/api/invoices", requireAuth, async (_req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("invoices")
+      .select("*, organizations(name)")
+      .order("created_at", { ascending: false });
 
-    res.json(subscription);
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.get("/api/staff/invoices", requireStaff, async (_req, res) => {
-    res.json(await storage.getAllInvoices());
+  app.post("/api/invoices", requireAuth, async (req, res) => {
+    const parsed = parsePayload(createInvoicePayloadSchema, req.body);
+    if (!parsed.ok) return res.status(400).json({ message: parsed.message });
+
+    const { data, error } = await supabaseAdmin
+      .from("invoices")
+      .insert({ ...parsed.data, invoice_no: `INV-${Date.now()}` })
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.post("/api/staff/invoices", requireStaff, async (req, res) => {
-    const parsed = parsePayload(createInvoicePayloadSchema, {
-      ...req.body,
-      subscriptionId: req.body?.subscriptionId ? Number(req.body.subscriptionId) : null,
-      notes: normalizeNullableText(req.body?.notes),
-    });
+  // ── Payments ───────────────────────────────────────────────
+  app.get("/api/payments", requireAuth, async (_req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("payments")
+      .select("*, organizations(name), invoices(invoice_no)")
+      .order("created_at", { ascending: false });
 
-    if (!parsed.ok) {
-      return res.status(400).json({ message: parsed.message });
-    }
-
-    const client = await storage.getClient(parsed.data.clientId);
-    if (!client) {
-      return res.status(404).json({ message: "找不到客戶" });
-    }
-
-    if (parsed.data.subscriptionId != null) {
-      const subscription = await storage.getSubscription(parsed.data.subscriptionId);
-      if (!subscription) {
-        return res.status(404).json({ message: "找不到訂閱" });
-      }
-
-      if (subscription.clientId !== parsed.data.clientId) {
-        return res.status(400).json({ message: "訂閱與客戶不一致" });
-      }
-    }
-
-    const allInvoices = await storage.getAllInvoices();
-    const year = new Date().getFullYear();
-    const sequence = String(allInvoices.length + 1).padStart(4, "0");
-    const invoiceNo = `INV-${year}-${sequence}`;
-
-    const invoice = await storage.createInvoice({ ...parsed.data, invoiceNo });
-    res.json(invoice);
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.patch("/api/staff/invoices/:id", requireStaff, async (req, res) => {
-    const invoice = await storage.updateInvoice(Number(req.params.id), req.body);
-    if (!invoice) {
-      return res.status(404).json({ message: "找不到帳單" });
-    }
+  app.post("/api/payments", requireAuth, async (req, res) => {
+    const parsed = parsePayload(createPaymentPayloadSchema, req.body);
+    if (!parsed.ok) return res.status(400).json({ message: parsed.message });
 
-    res.json(invoice);
+    const { data, error } = await supabaseAdmin
+      .from("payments")
+      .insert(parsed.data)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.get("/api/staff/payments", requireStaff, async (_req, res) => {
-    res.json(await storage.getAllPayments());
+  // ── Service Records ────────────────────────────────────────
+  app.get("/api/service-records", requireAuth, async (_req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("service_records")
+      .select("*, organizations(name)")
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.post("/api/staff/payments", requireStaff, async (req, res) => {
-    const parsed = parsePayload(createPaymentPayloadSchema, {
-      ...req.body,
-      paidAt: req.body?.paidAt ? new Date(req.body.paidAt) : new Date(),
-      notes: normalizeNullableText(req.body?.notes),
-    });
+  // ── Portal endpoints (for client organizations) ────────────
+  app.get("/api/portal/subscriptions", requireAuth, async (req, res) => {
+    // Get user's organization
+    const { data: membership } = await supabaseAdmin
+      .from("organization_members")
+      .select("organization_id")
+      .eq("user_id", req.supabaseUser!.id)
+      .eq("status", "active")
+      .limit(1)
+      .single();
 
-    if (!parsed.ok) {
-      return res.status(400).json({ message: parsed.message });
-    }
+    if (!membership) return res.json([]);
 
-    const invoice = await storage.getInvoice(parsed.data.invoiceId);
-    if (!invoice) {
-      return res.status(404).json({ message: "找不到帳單" });
-    }
+    const { data, error } = await supabaseAdmin
+      .from("subscriptions")
+      .select("*, plans(name, features)")
+      .eq("organization_id", membership.organization_id);
 
-    if (invoice.clientId !== parsed.data.clientId) {
-      return res.status(400).json({ message: "付款客戶與帳單不一致" });
-    }
-
-    const payment = await storage.createPayment(parsed.data);
-    if (payment.status === "success") {
-      await storage.updateInvoice(payment.invoiceId, { status: "paid" });
-    }
-
-    res.json(payment);
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.patch("/api/staff/payments/:id", requireStaff, async (req, res) => {
-    const payment = await storage.updatePayment(Number(req.params.id), req.body);
-    if (!payment) {
-      return res.status(404).json({ message: "找不到付款" });
-    }
+  app.get("/api/portal/invoices", requireAuth, async (req, res) => {
+    const { data: membership } = await supabaseAdmin
+      .from("organization_members")
+      .select("organization_id")
+      .eq("user_id", req.supabaseUser!.id)
+      .eq("status", "active")
+      .limit(1)
+      .single();
 
-    if (payment.status === "success") {
-      await storage.updateInvoice(payment.invoiceId, { status: "paid" });
-    }
+    if (!membership) return res.json([]);
 
-    res.json(payment);
+    const { data, error } = await supabaseAdmin
+      .from("invoices")
+      .select("*")
+      .eq("organization_id", membership.organization_id)
+      .order("issue_date", { ascending: false });
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.get("/api/staff/service-records", requireStaff, async (_req, res) => {
-    res.json(await storage.getAllServiceRecords());
+  app.get("/api/portal/service-records", requireAuth, async (req, res) => {
+    const { data: membership } = await supabaseAdmin
+      .from("organization_members")
+      .select("organization_id")
+      .eq("user_id", req.supabaseUser!.id)
+      .eq("status", "active")
+      .limit(1)
+      .single();
+
+    if (!membership) return res.json([]);
+
+    const { data, error } = await supabaseAdmin
+      .from("service_records")
+      .select("*")
+      .eq("organization_id", membership.organization_id)
+      .order("month", { ascending: false });
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.post("/api/staff/service-records", requireStaff, async (req, res) => {
-    const serviceRecord = await storage.createServiceRecord(req.body);
-    res.json(serviceRecord);
+  app.get("/api/portal/family", requireAuth, async (req, res) => {
+    const { data: membership } = await supabaseAdmin
+      .from("organization_members")
+      .select("organization_id")
+      .eq("user_id", req.supabaseUser!.id)
+      .eq("status", "active")
+      .limit(1)
+      .single();
+
+    if (!membership) return res.json([]);
+
+    const { data, error } = await supabaseAdmin
+      .from("care_recipients")
+      .select("*, person_profiles(*)")
+      .eq("primary_org_id", membership.organization_id)
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.get("/api/staff/stats", requireStaff, async (_req, res) => {
-    const [clients, subscriptions, invoices] = await Promise.all([
-      storage.getAllClients(),
-      storage.getAllSubscriptions(),
-      storage.getAllInvoices(),
-    ]);
+  // ── Audit Logs ─────────────────────────────────────────────
+  app.get("/api/audit-logs", requireAuth, async (_req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("audit_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(100);
 
-    const activeClients = clients.filter((client) => client.status === "active").length;
-    const pendingClients = clients.filter((client) => client.status === "pending").length;
-    const activeSubscriptions = subscriptions.filter((subscription) => subscription.status === "active").length;
-    const unpaidInvoices = invoices.filter((invoice) => invoice.status === "unpaid" || invoice.status === "overdue");
-    const unpaidAmount = unpaidInvoices.reduce((sum, invoice) => sum + invoice.total, 0);
-    const paidAmount = invoices
-      .filter((invoice) => invoice.status === "paid")
-      .reduce((sum, invoice) => sum + invoice.total, 0);
-    const mrr = subscriptions
-      .filter((subscription) => subscription.status === "active")
-      .reduce((sum, subscription) => sum + (subscription.billingCycle === "annual" ? subscription.amount / 12 : subscription.amount), 0);
-
-    res.json({
-      activeClients,
-      pendingClients,
-      activeSubscriptions,
-      unpaidInvoices: unpaidInvoices.length,
-      unpaidAmount,
-      paidAmount,
-      mrr,
-    });
-  });
-
-  app.get("/api/portal/me", requireClient, async (req, res) => {
-    const client = await storage.getClient(req.session.clientId!);
-    res.json(client);
-  });
-
-  app.get("/api/portal/subscriptions", requireClient, async (req, res) => {
-    res.json(await storage.getSubscriptionsByClient(req.session.clientId!));
-  });
-
-  app.get("/api/portal/invoices", requireClient, async (req, res) => {
-    res.json(await storage.getInvoicesByClient(req.session.clientId!));
-  });
-
-  app.get("/api/portal/service-records", requireClient, async (req, res) => {
-    res.json(await storage.getServiceRecordsByClient(req.session.clientId!));
-  });
-
-  app.post("/api/portal/pay", requireClient, async (req, res) => {
-    const parsed = parsePayload(portalPaymentSchema, req.body);
-    if (!parsed.ok) {
-      return res.status(400).json({ message: parsed.message });
-    }
-
-    const invoice = await storage.getInvoice(parsed.data.invoiceId);
-    if (!invoice) {
-      return res.status(404).json({ message: "找不到帳單" });
-    }
-
-    if (invoice.clientId !== req.session.clientId) {
-      return res.status(403).json({ message: "沒有這張帳單的付款權限" });
-    }
-
-    if (invoice.status === "paid") {
-      return res.status(400).json({ message: "這張帳單已經付款" });
-    }
-
-    const transactionId = `${parsed.data.method.toUpperCase()}-${Date.now()}`;
-    const payment = await storage.createPayment({
-      invoiceId: parsed.data.invoiceId,
-      clientId: req.session.clientId!,
-      amount: invoice.total,
-      method: parsed.data.method,
-      status: "success",
-      transactionId,
-      paidAt: new Date(),
-      notes: "mock gateway success",
-    });
-
-    await storage.updateInvoice(parsed.data.invoiceId, { status: "paid" });
-    res.json({ success: true, transactionId, payment });
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 }

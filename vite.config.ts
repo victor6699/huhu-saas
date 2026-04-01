@@ -1,9 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import "../scripts/register-env.mjs";
+import { viteDefineFromEnv } from "../scripts/env-loader.mjs";
 
 export default defineConfig({
   plugins: [react()],
+  envDir: path.resolve(import.meta.dirname, ".."),
+  define: viteDefineFromEnv(),
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),

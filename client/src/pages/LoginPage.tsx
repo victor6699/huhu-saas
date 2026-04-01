@@ -1,13 +1,12 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 
 export default function LoginPage() {
-  const [, nav] = useLocation();
+  const { signIn, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [tab, setTab] = useState<"staff" | "client">("client");
-  const [form, setForm] = useState({ username: "", password: "" });
+  const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
 
   const handle = (key: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -18,13 +17,8 @@ export default function LoginPage() {
     event.preventDefault();
     setLoading(true);
     try {
-      const endpoint = tab === "staff" ? "/api/staff/login" : "/api/client/login";
-      const me = await apiRequest("POST", endpoint, {
-        username: form.username,
-        password: form.password,
-      });
-      queryClient.setQueryData(["/api/me"], me);
-      nav(tab === "staff" ? "/staff/dashboard" : "/portal/overview");
+      await signIn(form.email, form.password);
+      toast({ title: "登入成功", description: "歡迎回來！" });
     } catch (error) {
       toast({
         title: "登入失敗",
@@ -38,6 +32,14 @@ export default function LoginPage() {
 
   const inputCls = "w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0ABAB5] focus:border-transparent";
   const labelCls = "block text-sm font-medium text-gray-700 mb-1";
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#E0F8F7] via-white to-[#F0FEFE]">
+        <div className="text-[#0ABAB5] text-lg font-medium animate-pulse">載入中...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#E0F8F7] via-white to-[#F0FEFE] flex items-center justify-center p-4">
@@ -57,7 +59,7 @@ export default function LoginPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-          {/* Tabs — 機構/單位 & 員工 only (C端個人用戶請從 HUHU Care App 訂閱) */}
+          {/* Tabs */}
           <div className="flex border-b">
             {(["client", "staff"] as const).map((currentTab) => (
               <button
@@ -76,14 +78,15 @@ export default function LoginPage() {
 
           <form onSubmit={submit} className="p-6 space-y-4">
             <div>
-              <label className={labelCls}>{tab === "staff" ? "員工帳號" : "客戶帳號"}</label>
+              <label className={labelCls}>Email</label>
               <input
                 required
-                value={form.username}
-                onChange={handle("username")}
+                type="email"
+                value={form.email}
+                onChange={handle("email")}
                 className={inputCls}
-                placeholder={tab === "staff" ? "admin" : "your_username"}
-                data-testid="input-username"
+                placeholder="your@email.com"
+                data-testid="input-email"
               />
             </div>
             <div>
@@ -99,24 +102,6 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* Demo hint */}
-            <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-500 space-y-1">
-              {tab === "staff" ? (
-                <>
-                  <p className="font-medium text-gray-600">Demo 員工帳號</p>
-                  <p>管理員：<code className="bg-gray-200 px-1 rounded">admin</code> / admin123</p>
-                  <p>業務：<code className="bg-gray-200 px-1 rounded">sales_chen</code> / demo123</p>
-                  <p>財務：<code className="bg-gray-200 px-1 rounded">finance_lin</code> / demo123</p>
-                </>
-              ) : (
-                <>
-                  <p className="font-medium text-gray-600">Demo 客戶帳號（密碼皆為 demo123）</p>
-                  <p>機構：<code className="bg-gray-200 px-1 rounded">cirai_org</code></p>
-                  <p>社福機構：<code className="bg-gray-200 px-1 rounded">taipei_welfare</code></p>
-                </>
-              )}
-            </div>
-
             <button
               type="submit"
               disabled={loading}
@@ -126,7 +111,6 @@ export default function LoginPage() {
               {loading ? "處理中..." : "登入"}
             </button>
 
-            {/* Forgot password & C-end notice */}
             <div className="space-y-1 pt-1">
               <p className="text-center text-xs text-gray-400">
                 忘記密碼？請聯絡客服{" "}
