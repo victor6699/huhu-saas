@@ -1,4 +1,4 @@
-import "../scripts/register-env.mjs";
+import "./scripts/register-env.mjs";
 import { defineConfig } from "drizzle-kit";
 
 if (!process.env.DATABASE_URL) {

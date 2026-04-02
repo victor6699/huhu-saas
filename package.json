@@ -4,11 +4,11 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "cross-env NODE_ENV=development node --import ../scripts/register-env.mjs --import tsx server/index.ts",
-    "build": "node --import ../scripts/register-env.mjs --import tsx script/build.ts",
-    "start": "cross-env NODE_ENV=production node --import ../scripts/register-env.mjs dist/index.cjs",
-    "check": "tsc",
-    "db:push": "node --import ../scripts/register-env.mjs ./node_modules/drizzle-kit/bin.cjs push"
+    "dev": "cross-env NODE_ENV=development node --import ./scripts/register-env.mjs --import tsx server/index.ts",
+	"build": "node --import ./scripts/register-env.mjs --import tsx script/build.ts",
+	"start": "cross-env NODE_ENV=production node --import ./scripts/register-env.mjs dist/index.cjs",
+	"db:push": "node --import ./scripts/register-env.mjs ./node_modules/drizzle-kit/bin.cjs push"
+
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
