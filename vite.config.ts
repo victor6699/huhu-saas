@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import "../scripts/register-env.mjs";
-import { viteDefineFromEnv } from "../scripts/env-loader.mjs";
+import "./scripts/register-env.mjs";
+import { viteDefineFromEnv } from "./scripts/env-loader.mjs";
 
 export default defineConfig({
   plugins: [react()],
