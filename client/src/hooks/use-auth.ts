@@ -47,6 +47,17 @@ export function useAuth() {
   }, []);
 
   useEffect(() => {
+    // SSO: if huhu-care passed tokens via URL params, auto-login
+    const urlParams = new URLSearchParams(window.location.search);
+    const ssoAccess = urlParams.get("t");
+    const ssoRefresh = urlParams.get("r");
+    if (ssoAccess) {
+      supabase.auth.setSession({ access_token: ssoAccess, refresh_token: ssoRefresh || "" })
+        .catch(() => {/* ignore SSO errors, fall through to normal auth */});
+      // Clean tokens from URL so they don't stay in browser history
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+    }
+
     // Timeout guard: if getSession takes too long (Safari/iOS), stop loading
     const timeoutId = setTimeout(() => {
       setLoading(false);
