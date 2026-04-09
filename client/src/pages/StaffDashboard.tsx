@@ -1,52 +1,136 @@
-import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, forceLogout } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-type Staff = { id: number; displayName: string; role: string; username: string; email: string; isActive: boolean };
-type Client = { id: number; clientType: string; orgName: string | null; contactName: string; contactEmail: string; contactPhone: string | null; taxId: string | null; status: string; notes: string | null; assignedTo: number | null; createdAt: string; activatedAt: string | null };
-type Plan = { id: number; name: string; monthlyPrice: number; annualPrice: number; maxElders: number; features: string };
-type Subscription = { id: number; clientId: number; planId: number; billingCycle: string; status: string; elderCount: number; startDate: string; endDate: string; nextBillingDate: string; amount: number };
-type Invoice = { id: number; invoiceNo: string; clientId: number; issueDate: string; dueDate: string; periodStart: string; periodEnd: string; subtotal: number; tax: number; total: number; status: string; notes: string | null };
-type Payment = { id: number; invoiceId: number; clientId: number; amount: number; method: string; status: string; transactionId: string | null; paidAt: string | null; notes: string | null };
-type ServiceRecord = { id: number; clientId: number; month: string; elderCount: number; conversationCount: number; alertCount: number; activeElders: number };
-type Stats = { activeClients: number; pendingClients: number; activeSubscriptions: number; unpaidInvoices: number; unpaidAmount: number; paidAmount: number; mrr: number };
-
-const INITIAL_CLIENT_FORM = {
-  username: "",
-  password: "",
-  orgName: "",
-  contactName: "",
-  contactEmail: "",
-  contactPhone: "",
-  taxId: "",
-  address: "",
-  clientType: "institution",
+// ── Types (Supabase returns snake_case column names) ──────────────────────────
+type Me = {
+  id: string;
+  email: string;
+  profile: { full_name: string; nickname?: string } | null;
+  memberships: { organization_id: string; role_code: string; organizations: { name: string; org_type: string } | null }[];
+};
+type StaffMember = {
+  id: string;
+  user_id: string;
+  role_code: string;
+  title: string | null;
+  person_profiles: { full_name: string; email: string | null; avatar_url: string | null } | null;
+};
+type Organization = {
+  id: string;
+  org_type: string;
+  name: string;
+  legal_name: string | null;
+  tax_id: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  status: string;
+  created_at: string;
+};
+type Plan = {
+  id: string;
+  name: string;
+  monthly_price: number;
+  annual_price: number;
+  max_elders: number;
+  features: string;
+};
+type Subscription = {
+  id: string;
+  organization_id: string;
+  plan_id: string;
+  billing_cycle: string;
+  status: string;
+  elder_count: number;
+  start_date: string;
+  end_date: string;
+  next_billing_date: string;
+  amount: number;
+  organizations?: { name: string };
+  plans?: { name: string };
+};
+type Invoice = {
+  id: string;
+  invoice_no: string;
+  organization_id: string;
+  subscription_id: string | null;
+  issue_date: string;
+  due_date: string;
+  period_start: string;
+  period_end: string;
+  subtotal: number;
+  tax: number;
+  total: number;
+  status: string;
+  notes: string | null;
+  organizations?: { name: string };
+  created_at: string;
+};
+type Payment = {
+  id: string;
+  invoice_id: string;
+  organization_id: string;
+  amount: number;
+  method: string;
+  status: string;
+  transaction_id: string | null;
+  paid_at: string | null;
+  notes: string | null;
+  created_at: string;
+};
+type ServiceRecord = {
+  id: string;
+  organization_id: string;
+  month: string;
+  elder_count: number;
+  conversation_count: number;
+  alert_count: number;
+  active_elders: number;
 };
 
-const INITIAL_STAFF_FORM = {
-  username: "",
-  password: "",
-  displayName: "",
-  role: "sales",
+// ── Form initial states ────────────────────────────────────────────────────────
+const INITIAL_ORG_FORM = {
+  orgType: "care_institution" as "individual_family" | "care_institution" | "gov_welfare_bureau",
+  name: "",
+  legalName: "",
+  taxId: "",
+  address: "",
+  phone: "",
   email: "",
 };
 
-const TYPE_LABEL: Record<string, string> = { institution: "機構", social_welfare: "社會局/社福", individual: "個人" };
+const INITIAL_STAFF_FORM = {
+  email: "",
+  password: "",
+  displayName: "",
+  role: "sales",
+};
+
+// ── UI helpers ─────────────────────────────────────────────────────────────────
+const ORG_TYPE_LABEL: Record<string, string> = {
+  care_institution: "機構",
+  gov_welfare_bureau: "社會局/社福",
+  individual_family: "個人",
+};
 const STATUS_BADGE: Record<string, string> = {
   active: "bg-green-100 text-green-800", pending: "bg-yellow-100 text-yellow-800",
   suspended: "bg-red-100 text-red-800", cancelled: "bg-gray-100 text-gray-600",
   paid: "bg-green-100 text-green-800", unpaid: "bg-yellow-100 text-yellow-800",
   overdue: "bg-red-100 text-red-800", success: "bg-green-100 text-green-800",
   failed: "bg-red-100 text-red-800", refunded: "bg-purple-100 text-purple-800",
+  trial: "bg-blue-100 text-blue-800",
 };
 const STATUS_ZH: Record<string, string> = {
   active: "啟用", pending: "待審核", suspended: "停用", cancelled: "已取消",
   paid: "已付款", unpaid: "待付款", overdue: "逾期", success: "成功",
-  failed: "失敗", refunded: "退款",
+  failed: "失敗", refunded: "退款", trial: "試用",
 };
-const METHOD_ZH: Record<string, string> = { newebpay: "藍新金流", ecpay: "綠界科技", stripe: "Stripe", bank_transfer: "銀行匯款", manual: "手動記錄" };
+const METHOD_ZH: Record<string, string> = {
+  newebpay: "藍新金流", ecpay: "綠界科技", stripe: "Stripe",
+  bank_transfer: "銀行匯款", manual: "手動記錄",
+};
 
 function Badge({ status }: { status: string }) {
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_BADGE[status] ?? "bg-gray-100 text-gray-600"}`}>{STATUS_ZH[status] ?? status}</span>;
@@ -64,56 +148,73 @@ function Stat({ label, value, sub, color = "blue" }: { label: string; value: str
 }
 
 export default function StaffDashboard() {
-  const [, nav] = useLocation();
   const { toast } = useToast();
   const [section, setSection] = useState<"overview"|"clients"|"subscriptions"|"invoices"|"payments"|"service"|"staff">("overview");
-  const [newInvForm, setNewInvForm] = useState({ clientId: "", subscriptionId: "", periodStart: "", periodEnd: "", issueDate: "", dueDate: "", subtotal: "", tax: "5", notes: "" });
-  const [newPayForm, setNewPayForm] = useState({ invoiceId: "", clientId: "", amount: "", method: "bank_transfer", notes: "" });
+
+  // Form state (all IDs are strings / UUIDs)
+  const [newInvForm, setNewInvForm] = useState({ organizationId: "", subscriptionId: "", periodStart: "", periodEnd: "", issueDate: "", dueDate: "", subtotal: "", tax: "5", notes: "" });
+  const [newPayForm, setNewPayForm] = useState({ invoiceId: "", organizationId: "", amount: "", method: "bank_transfer", notes: "" });
   const [showPayModal, setShowPayModal] = useState(false);
   const [showInvModal, setShowInvModal] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
-  const [newClientForm, setNewClientForm] = useState(INITIAL_CLIENT_FORM);
+  const [newOrgForm, setNewOrgForm] = useState(INITIAL_ORG_FORM);
   const [showSubModal, setShowSubModal] = useState(false);
-  const [newSubForm, setNewSubForm] = useState({ clientId: "", planId: "", billingCycle: "monthly", elderCount: "1", amount: "", startDate: "", endDate: "" });
+  const [newSubForm, setNewSubForm] = useState({ organizationId: "", planId: "", billingCycle: "monthly", elderCount: "1", amount: "", startDate: "", endDate: "" });
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [newStaffForm, setNewStaffForm] = useState(INITIAL_STAFF_FORM);
 
-  const { data: me } = useQuery<Staff>({ queryKey: ["/api/me"] });
-  const { data: staffList = [] } = useQuery<Staff[]>({ queryKey: ["/api/staff/members"] });
-  const { data: stats } = useQuery<Stats>({ queryKey: ["/api/staff/stats"] });
-  const { data: clients = [] } = useQuery<Client[]>({ queryKey: ["/api/staff/clients"] });
-  const { data: subscriptions = [] } = useQuery<Subscription[]>({ queryKey: ["/api/staff/subscriptions"] });
-  const { data: invoices = [] } = useQuery<Invoice[]>({ queryKey: ["/api/staff/invoices"] });
-  const { data: payments = [] } = useQuery<Payment[]>({ queryKey: ["/api/staff/payments"] });
-  const { data: serviceRecords = [] } = useQuery<ServiceRecord[]>({ queryKey: ["/api/staff/service-records"] });
+  // ── Queries ────────────────────────────────────────────────
+  const { data: me } = useQuery<Me>({ queryKey: ["/api/me"] });
+  const { data: staffList = [] } = useQuery<StaffMember[]>({ queryKey: ["/api/staff/members"] });
+  const { data: organizations = [] } = useQuery<Organization[]>({ queryKey: ["/api/organizations"] });
+  const { data: subscriptions = [] } = useQuery<Subscription[]>({ queryKey: ["/api/subscriptions"] });
+  const { data: invoices = [] } = useQuery<Invoice[]>({ queryKey: ["/api/invoices"] });
+  const { data: payments = [] } = useQuery<Payment[]>({ queryKey: ["/api/payments"] });
+  const { data: serviceRecords = [] } = useQuery<ServiceRecord[]>({ queryKey: ["/api/service-records"] });
   const { data: plans = [] } = useQuery<Plan[]>({ queryKey: ["/api/plans"] });
 
-  useEffect(() => {
-    // redirect if not staff
-  }, [me]);
+  // ── Computed stats (no separate stats endpoint needed) ─────
+  const stats = useMemo(() => {
+    const activeClients = organizations.filter(o => o.status === "active").length;
+    const pendingClients = organizations.filter(o => o.status === "pending").length;
+    const activeSubscriptions = subscriptions.filter(s => s.status === "active").length;
+    const unpaidInvs = invoices.filter(i => i.status === "unpaid" || i.status === "overdue");
+    const unpaidInvoices = unpaidInvs.length;
+    const unpaidAmount = unpaidInvs.reduce((sum, i) => sum + Number(i.total), 0);
+    const paidAmount = payments.filter(p => p.status === "success").reduce((sum, p) => sum + Number(p.amount), 0);
+    const mrr = subscriptions
+      .filter(s => s.status === "active")
+      .reduce((sum, s) => sum + (s.billing_cycle === "annual" ? Number(s.amount) / 12 : Number(s.amount)), 0);
+    return { activeClients, pendingClients, activeSubscriptions, unpaidInvoices, unpaidAmount, paidAmount, mrr };
+  }, [organizations, subscriptions, invoices, payments]);
 
+  // ── Mutations ──────────────────────────────────────────────
   const activateMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("POST", `/api/staff/clients/${id}/activate`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/clients"] }); queryClient.invalidateQueries({ queryKey: ["/api/staff/stats"] }); toast({ title: "已開通客戶" }); },
+    mutationFn: (id: string) => apiRequest("PATCH", `/api/organizations/${id}`, { status: "active" }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/organizations"] }); toast({ title: "已開通客戶" }); },
   });
   const suspendMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("POST", `/api/staff/clients/${id}/suspend`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/clients"] }); queryClient.invalidateQueries({ queryKey: ["/api/staff/stats"] }); toast({ title: "已停用客戶" }); },
+    mutationFn: (id: string) => apiRequest("PATCH", `/api/organizations/${id}`, { status: "suspended" }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/organizations"] }); toast({ title: "已停用客戶" }); },
   });
   const createInvMutation = useMutation({
-    mutationFn: (body: any) => apiRequest("POST", "/api/staff/invoices", body),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/invoices"] }); setShowInvModal(false); toast({ title: "帳單已建立" }); },
+    mutationFn: (body: any) => apiRequest("POST", "/api/invoices", body),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/invoices"] }); setShowInvModal(false); toast({ title: "帳單已建立" }); },
   });
   const createPayMutation = useMutation({
-    mutationFn: (body: any) => apiRequest("POST", "/api/staff/payments", body),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/payments"] }); queryClient.invalidateQueries({ queryKey: ["/api/staff/invoices"] }); setShowPayModal(false); toast({ title: "付款紀錄已新增，帳單標記為已付款" }); },
+    mutationFn: (body: any) => apiRequest("POST", "/api/payments", body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      setShowPayModal(false);
+      toast({ title: "付款紀錄已新增，帳單標記為已付款" });
+    },
   });
   const createClientMutation = useMutation({
-    mutationFn: (body: any) => apiRequest("POST", "/api/staff/clients", body),
+    mutationFn: (body: any) => apiRequest("POST", "/api/organizations", body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/staff/clients"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/staff/stats"] });
-      setNewClientForm(INITIAL_CLIENT_FORM);
+      queryClient.invalidateQueries({ queryKey: ["/api/organizations"] });
+      setNewOrgForm(INITIAL_ORG_FORM);
       setShowClientModal(false);
       toast({ title: "客戶已新增" });
     },
@@ -122,8 +223,8 @@ export default function StaffDashboard() {
     },
   });
   const createSubMutation = useMutation({
-    mutationFn: (body: any) => apiRequest("POST", "/api/staff/subscriptions", body),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/subscriptions"] }); setShowSubModal(false); toast({ title: "訂閱已新增" }); },
+    mutationFn: (body: any) => apiRequest("POST", "/api/subscriptions", body),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/subscriptions"] }); setShowSubModal(false); toast({ title: "訂閱已新增" }); },
   });
   const createStaffMutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", "/api/staff/members", body),
@@ -137,16 +238,20 @@ export default function StaffDashboard() {
       toast({ title: "新增失敗", description: error.message, variant: "destructive" });
     },
   });
-  const logout = async () => {
-    await forceLogout();
-  };
+  const logout = async () => { await forceLogout(); };
 
-  const clientName = (id: number) => {
-    const c = clients.find(c => c.id === id);
-    return c ? (c.orgName || c.contactName) : `客戶#${id}`;
+  // ── Helpers ────────────────────────────────────────────────
+  const orgName = (id: string) => {
+    const o = organizations.find(o => o.id === id);
+    return o ? o.name : `機構#${id.slice(0, 8)}`;
   };
-  const planName = (id: number) => plans.find(p => p.id === id)?.name ?? `方案#${id}`;
-  const fmt = (n: number) => n.toLocaleString("zh-TW");
+  const planName = (id: string) => plans.find(p => p.id === id)?.name ?? `方案#${id.slice(0, 8)}`;
+  const fmt = (n: number) => Math.round(n).toLocaleString("zh-TW");
+
+  // Current user display
+  const myName = me?.profile?.full_name || me?.email || "";
+  const myRole = me?.memberships?.[0]?.role_code || "";
+  const roleLabel = myRole === "superadmin" ? "超級管理員" : myRole === "sales" ? "業務" : myRole === "finance" ? "財務" : myRole || "員工";
 
   const navItems = [
     { key: "overview", label: "總覽", icon: "📊" },
@@ -180,7 +285,7 @@ export default function StaffDashboard() {
           ))}
         </nav>
         <div className="p-3 border-t border-blue-800">
-          <div className="text-xs text-blue-300 mb-2 px-1">{me?.displayName} · {me?.role === "superadmin" ? "超級管理員" : me?.role === "sales" ? "業務" : me?.role === "finance" ? "財務" : me?.role}</div>
+          <div className="text-xs text-blue-300 mb-2 px-1">{myName} · {roleLabel}</div>
           <button onClick={logout} className="w-full text-left px-3 py-2 rounded-lg text-sm text-blue-300 hover:bg-blue-800 hover:text-white transition-colors">🚪 登出</button>
         </div>
       </aside>
@@ -190,17 +295,17 @@ export default function StaffDashboard() {
         <div className="p-6">
 
           {/* ── Overview ── */}
-          {section === "overview" && stats && (
+          {section === "overview" && (
             <div>
               <h1 className="text-xl font-bold text-gray-900 mb-6">營運總覽</h1>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <Stat label="啟用客戶" value={stats.activeClients} sub="家" color="blue" />
                 <Stat label="待審核" value={stats.pendingClients} sub="家" color="amber" />
-                <Stat label="月均收入 (MRR)" value={`NT$ ${fmt(Math.round(stats.mrr))}`} color="green" />
-                <Stat label="待收帳款" value={`NT$ ${fmt(Math.round(stats.unpaidAmount))}`} sub={`${stats.unpaidInvoices} 張帳單`} color="red" />
+                <Stat label="月均收入 (MRR)" value={`NT$ ${fmt(stats.mrr)}`} color="green" />
+                <Stat label="待收帳款" value={`NT$ ${fmt(stats.unpaidAmount)}`} sub={`${stats.unpaidInvoices} 張帳單`} color="red" />
               </div>
               <div className="grid grid-cols-2 gap-4 mb-6">
-                <Stat label="累計已收款" value={`NT$ ${fmt(Math.round(stats.paidAmount))}`} color="green" />
+                <Stat label="累計已收款" value={`NT$ ${fmt(stats.paidAmount)}`} color="green" />
                 <Stat label="進行中訂閱" value={stats.activeSubscriptions} sub="份" color="blue" />
               </div>
               {/* Recent invoices */}
@@ -210,11 +315,11 @@ export default function StaffDashboard() {
                   <button onClick={() => setSection("invoices")} className="text-sm text-blue-600 hover:underline">查看全部</button>
                 </div>
                 <div className="divide-y">
-                  {[...invoices].sort((a,b)=>b.id-a.id).slice(0,5).map(inv => (
+                  {[...invoices].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 5).map(inv => (
                     <div key={inv.id} className="px-4 py-3 flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-900">{inv.invoiceNo}</p>
-                        <p className="text-xs text-gray-500">{clientName(inv.clientId)} · 到期 {inv.dueDate}</p>
+                        <p className="text-sm font-medium text-gray-900">{inv.invoice_no}</p>
+                        <p className="text-xs text-gray-500">{orgName(inv.organization_id)} · 到期 {inv.due_date}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-semibold text-gray-900">NT$ {fmt(inv.total)}</p>
@@ -238,20 +343,20 @@ export default function StaffDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
                     <tr>
-                      {["客戶名稱","類型","聯絡人","Email","狀態","建立日期","操作"].map(h=>(
+                      {["客戶名稱","類型","Email","電話","狀態","建立日期","操作"].map(h=>(
                         <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {clients.map(c => (
+                    {organizations.map(c => (
                       <tr key={c.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{c.orgName || c.contactName}</td>
-                        <td className="px-4 py-3 text-gray-600">{TYPE_LABEL[c.clientType]}</td>
-                        <td className="px-4 py-3 text-gray-600">{c.contactName}</td>
-                        <td className="px-4 py-3 text-gray-600">{c.contactEmail}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
+                        <td className="px-4 py-3 text-gray-600">{ORG_TYPE_LABEL[c.org_type] ?? c.org_type}</td>
+                        <td className="px-4 py-3 text-gray-600">{c.email}</td>
+                        <td className="px-4 py-3 text-gray-600">{c.phone}</td>
                         <td className="px-4 py-3"><Badge status={c.status} /></td>
-                        <td className="px-4 py-3 text-gray-500">{c.createdAt?.slice(0,10)}</td>
+                        <td className="px-4 py-3 text-gray-500">{c.created_at?.slice(0,10)}</td>
                         <td className="px-4 py-3 flex gap-1">
                           {c.status === "pending" && (
                             <button onClick={() => activateMutation.mutate(c.id)} className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs hover:bg-green-200">✓ 開通</button>
@@ -269,7 +374,7 @@ export default function StaffDashboard() {
                 </table>
               </div>
 
-              {/* New Client Modal */}
+              {/* New Org Modal */}
               {showClientModal && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                   <div className="bg-white rounded-2xl w-full max-w-md p-6">
@@ -277,54 +382,44 @@ export default function StaffDashboard() {
                     <div className="space-y-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">類型</label>
-                        <select value={newClientForm.clientType} onChange={e=>setNewClientForm(f=>({...f,clientType:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
-                          <option value="institution">機構</option>
-                          <option value="social_welfare">社會局/社福</option>
-                          <option value="individual">個人</option>
+                        <select value={newOrgForm.orgType} onChange={e=>setNewOrgForm(f=>({...f,orgType:e.target.value as any}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                          <option value="care_institution">機構</option>
+                          <option value="gov_welfare_bureau">社會局/社福</option>
+                          <option value="individual_family">個人</option>
                         </select>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">機構名稱</label>
-                          <input value={newClientForm.orgName} onChange={e=>setNewClientForm(f=>({...f,orgName:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                          <input value={newOrgForm.name} onChange={e=>setNewOrgForm(f=>({...f,name:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">聯絡人</label>
-                          <input value={newClientForm.contactName} onChange={e=>setNewClientForm(f=>({...f,contactName:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">登入帳號</label>
-                          <input value={newClientForm.username} onChange={e=>setNewClientForm(f=>({...f,username:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">登入密碼</label>
-                          <input type="password" value={newClientForm.password} onChange={e=>setNewClientForm(f=>({...f,password:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">法定名稱</label>
+                          <input value={newOrgForm.legalName} onChange={e=>setNewOrgForm(f=>({...f,legalName:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                         </div>
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
-                        <input value={newClientForm.contactEmail} onChange={e=>setNewClientForm(f=>({...f,contactEmail:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        <input value={newOrgForm.email} onChange={e=>setNewOrgForm(f=>({...f,email:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">電話</label>
-                          <input value={newClientForm.contactPhone} onChange={e=>setNewClientForm(f=>({...f,contactPhone:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                          <input value={newOrgForm.phone} onChange={e=>setNewOrgForm(f=>({...f,phone:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">統編</label>
-                          <input value={newClientForm.taxId} onChange={e=>setNewClientForm(f=>({...f,taxId:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                          <input value={newOrgForm.taxId} onChange={e=>setNewOrgForm(f=>({...f,taxId:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                         </div>
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">地址</label>
-                        <input value={newClientForm.address} onChange={e=>setNewClientForm(f=>({...f,address:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        <input value={newOrgForm.address} onChange={e=>setNewOrgForm(f=>({...f,address:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                       </div>
                     </div>
                     <div className="flex gap-2 mt-5">
-                      <button onClick={() => createClientMutation.mutate(newClientForm)} disabled={createClientMutation.isPending} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">建立</button>
-                      <button onClick={()=>{ setNewClientForm(INITIAL_CLIENT_FORM); setShowClientModal(false); }} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                      <button onClick={() => createClientMutation.mutate({ orgType: newOrgForm.orgType, name: newOrgForm.name, legalName: newOrgForm.legalName || null, taxId: newOrgForm.taxId || null, address: newOrgForm.address || null, phone: newOrgForm.phone || null, email: newOrgForm.email || null })} disabled={createClientMutation.isPending} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">建立</button>
+                      <button onClick={()=>{ setNewOrgForm(INITIAL_ORG_FORM); setShowClientModal(false); }} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
                     </div>
                   </div>
                 </div>
@@ -351,14 +446,14 @@ export default function StaffDashboard() {
                   <tbody className="divide-y">
                     {subscriptions.map(s => (
                       <tr key={s.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{clientName(s.clientId)}</td>
-                        <td className="px-4 py-3 text-gray-600">{planName(s.planId)}</td>
-                        <td className="px-4 py-3 text-gray-600">{s.billingCycle === "annual" ? "年繳" : "月繳"}</td>
-                        <td className="px-4 py-3 text-gray-600">{s.elderCount} 位</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{s.organizations?.name ?? orgName(s.organization_id)}</td>
+                        <td className="px-4 py-3 text-gray-600">{s.plans?.name ?? planName(s.plan_id)}</td>
+                        <td className="px-4 py-3 text-gray-600">{s.billing_cycle === "annual" ? "年繳" : "月繳"}</td>
+                        <td className="px-4 py-3 text-gray-600">{s.elder_count} 位</td>
                         <td className="px-4 py-3 font-medium">NT$ {fmt(s.amount)}</td>
                         <td className="px-4 py-3"><Badge status={s.status} /></td>
-                        <td className="px-4 py-3 text-gray-500">{s.endDate}</td>
-                        <td className="px-4 py-3 text-gray-500">{s.nextBillingDate}</td>
+                        <td className="px-4 py-3 text-gray-500">{s.end_date}</td>
+                        <td className="px-4 py-3 text-gray-500">{s.next_billing_date}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -373,16 +468,16 @@ export default function StaffDashboard() {
                     <div className="space-y-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">客戶</label>
-                        <select value={newSubForm.clientId} onChange={e=>setNewSubForm(f=>({...f,clientId:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                        <select value={newSubForm.organizationId} onChange={e=>setNewSubForm(f=>({...f,organizationId:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
                           <option value="">選擇客戶</option>
-                          {clients.filter(c=>c.status==="active").map(c=><option key={c.id} value={c.id}>{c.orgName||c.contactName}</option>)}
+                          {organizations.filter(c=>c.status==="active").map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">方案</label>
-                        <select value={newSubForm.planId} onChange={e=>setNewSubForm(f=>({...f,planId:e.target.value,amount:plans.find(p=>p.id===Number(e.target.value))?.monthlyPrice.toString()||""}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                        <select value={newSubForm.planId} onChange={e=>setNewSubForm(f=>({...f,planId:e.target.value,amount:plans.find(p=>p.id===e.target.value)?.monthly_price.toString()||""}))} className="w-full border rounded px-2 py-1.5 text-sm">
                           <option value="">選擇方案</option>
-                          {plans.map(p=><option key={p.id} value={p.id}>{p.name} (NT${p.monthlyPrice}/月)</option>)}
+                          {plans.map(p=><option key={p.id} value={p.id}>{p.name} (NT${p.monthly_price}/月)</option>)}
                         </select>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
@@ -400,6 +495,12 @@ export default function StaffDashboard() {
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">長輩數</label>
+                          <input type="number" value={newSubForm.elderCount} onChange={e=>setNewSubForm(f=>({...f,elderCount:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">開始日期</label>
                           <input type="date" value={newSubForm.startDate} onChange={e=>setNewSubForm(f=>({...f,startDate:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                         </div>
@@ -411,7 +512,7 @@ export default function StaffDashboard() {
                     </div>
                     <div className="flex gap-2 mt-5">
                       <button onClick={() => {
-                        createSubMutation.mutate({ ...newSubForm, clientId: Number(newSubForm.clientId), planId: Number(newSubForm.planId), amount: Number(newSubForm.amount), elderCount: Number(newSubForm.elderCount), nextBillingDate: newSubForm.endDate, status: "active" });
+                        createSubMutation.mutate({ organizationId: newSubForm.organizationId, planId: newSubForm.planId, billingCycle: newSubForm.billingCycle, elderCount: Number(newSubForm.elderCount), amount: Number(newSubForm.amount), startDate: newSubForm.startDate, endDate: newSubForm.endDate, nextBillingDate: newSubForm.endDate, status: "active" });
                       }} disabled={createSubMutation.isPending} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">建立</button>
                       <button onClick={()=>setShowSubModal(false)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
                     </div>
@@ -438,12 +539,12 @@ export default function StaffDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {[...invoices].sort((a,b)=>b.id-a.id).map(inv => (
+                    {[...invoices].sort((a, b) => b.created_at.localeCompare(a.created_at)).map(inv => (
                       <tr key={inv.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-mono text-xs font-medium text-blue-700">{inv.invoiceNo}</td>
-                        <td className="px-4 py-3 font-medium text-gray-900">{clientName(inv.clientId)}</td>
-                        <td className="px-4 py-3 text-gray-500">{inv.issueDate}</td>
-                        <td className="px-4 py-3 text-gray-500">{inv.dueDate}</td>
+                        <td className="px-4 py-3 font-mono text-xs font-medium text-blue-700">{inv.invoice_no}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{inv.organizations?.name ?? orgName(inv.organization_id)}</td>
+                        <td className="px-4 py-3 text-gray-500">{inv.issue_date}</td>
+                        <td className="px-4 py-3 text-gray-500">{inv.due_date}</td>
                         <td className="px-4 py-3">NT$ {fmt(inv.subtotal)}</td>
                         <td className="px-4 py-3 text-gray-500">NT$ {fmt(inv.tax)}</td>
                         <td className="px-4 py-3 font-semibold">NT$ {fmt(inv.total)}</td>
@@ -464,16 +565,16 @@ export default function StaffDashboard() {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">客戶</label>
-                          <select value={newInvForm.clientId} onChange={e=>setNewInvForm(f=>({...f,clientId:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                          <select value={newInvForm.organizationId} onChange={e=>setNewInvForm(f=>({...f,organizationId:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
                             <option value="">選擇客戶</option>
-                            {clients.filter(c=>c.status==="active").map(c=><option key={c.id} value={c.id}>{c.orgName||c.contactName}</option>)}
+                            {organizations.filter(c=>c.status==="active").map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
                           </select>
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">訂閱</label>
                           <select value={newInvForm.subscriptionId} onChange={e=>setNewInvForm(f=>({...f,subscriptionId:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
                             <option value="">選擇訂閱（可選）</option>
-                            {subscriptions.filter(s=>newInvForm.clientId?s.clientId===Number(newInvForm.clientId):true).map(s=><option key={s.id} value={s.id}>{planName(s.planId)} - {s.billingCycle==="annual"?"年繳":"月繳"}</option>)}
+                            {subscriptions.filter(s=>newInvForm.organizationId?s.organization_id===newInvForm.organizationId:true).map(s=><option key={s.id} value={s.id}>{s.plans?.name ?? planName(s.plan_id)} - {s.billing_cycle==="annual"?"年繳":"月繳"}</option>)}
                           </select>
                         </div>
                       </div>
@@ -515,7 +616,7 @@ export default function StaffDashboard() {
                     <div className="flex gap-2 mt-5">
                       <button onClick={() => {
                         const sub = Number(newInvForm.subtotal); const tax = Number(newInvForm.tax);
-                        createInvMutation.mutate({ clientId: Number(newInvForm.clientId), subscriptionId: newInvForm.subscriptionId?Number(newInvForm.subscriptionId):null, periodStart: newInvForm.periodStart, periodEnd: newInvForm.periodEnd, issueDate: newInvForm.issueDate, dueDate: newInvForm.dueDate, subtotal: sub, tax, total: sub+tax, status: "unpaid", notes: newInvForm.notes||null });
+                        createInvMutation.mutate({ organizationId: newInvForm.organizationId, subscriptionId: newInvForm.subscriptionId || null, periodStart: newInvForm.periodStart, periodEnd: newInvForm.periodEnd, issueDate: newInvForm.issueDate, dueDate: newInvForm.dueDate, subtotal: sub, tax, total: sub + tax, status: "unpaid", notes: newInvForm.notes || null });
                       }} disabled={createInvMutation.isPending} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">建立帳單</button>
                       <button onClick={()=>setShowInvModal(false)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
                     </div>
@@ -536,24 +637,23 @@ export default function StaffDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
                     <tr>
-                      {["付款ID","帳單","客戶","金額","付款方式","狀態","交易編號","付款時間","備註"].map(h=>(
+                      {["帳單","客戶","金額","付款方式","狀態","交易編號","付款時間","備註"].map(h=>(
                         <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {[...payments].sort((a,b)=>b.id-a.id).map(p => {
-                      const inv = invoices.find(i=>i.id===p.invoiceId);
+                    {[...payments].sort((a, b) => b.created_at.localeCompare(a.created_at)).map(p => {
+                      const inv = invoices.find(i => i.id === p.invoice_id);
                       return (
                         <tr key={p.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-gray-500 font-mono text-xs">#{p.id}</td>
-                          <td className="px-4 py-3 text-blue-700 font-mono text-xs">{inv?.invoiceNo ?? `INV#${p.invoiceId}`}</td>
-                          <td className="px-4 py-3 font-medium text-gray-900">{clientName(p.clientId)}</td>
+                          <td className="px-4 py-3 text-blue-700 font-mono text-xs">{inv?.invoice_no ?? `INV#${p.invoice_id.slice(0,8)}`}</td>
+                          <td className="px-4 py-3 font-medium text-gray-900">{orgName(p.organization_id)}</td>
                           <td className="px-4 py-3 font-semibold">NT$ {fmt(p.amount)}</td>
                           <td className="px-4 py-3 text-gray-600">{METHOD_ZH[p.method] ?? p.method}</td>
                           <td className="px-4 py-3"><Badge status={p.status} /></td>
-                          <td className="px-4 py-3 font-mono text-xs text-gray-500">{p.transactionId}</td>
-                          <td className="px-4 py-3 text-gray-500">{p.paidAt ? new Date(p.paidAt).toLocaleDateString("zh-TW") : "-"}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-gray-500">{p.transaction_id}</td>
+                          <td className="px-4 py-3 text-gray-500">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("zh-TW") : "-"}</td>
                           <td className="px-4 py-3 text-gray-500 max-w-[100px] truncate">{p.notes}</td>
                         </tr>
                       );
@@ -571,11 +671,11 @@ export default function StaffDashboard() {
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">對應帳單</label>
                         <select value={newPayForm.invoiceId} onChange={e=>{
-                          const inv=invoices.find(i=>i.id===Number(e.target.value));
-                          setNewPayForm(f=>({...f,invoiceId:e.target.value,clientId:inv?String(inv.clientId):"",amount:inv?String(inv.total):""}));
+                          const inv = invoices.find(i => i.id === e.target.value);
+                          setNewPayForm(f=>({...f, invoiceId: e.target.value, organizationId: inv?.organization_id ?? "", amount: inv ? String(inv.total) : "" }));
                         }} className="w-full border rounded px-2 py-1.5 text-sm">
                           <option value="">選擇帳單</option>
-                          {invoices.filter(i=>i.status!=="paid").map(i=><option key={i.id} value={i.id}>{i.invoiceNo} — {clientName(i.clientId)} — NT${fmt(i.total)}</option>)}
+                          {invoices.filter(i=>i.status!=="paid").map(i=><option key={i.id} value={i.id}>{i.invoice_no} — {i.organizations?.name ?? orgName(i.organization_id)} — NT${fmt(i.total)}</option>)}
                         </select>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
@@ -601,7 +701,7 @@ export default function StaffDashboard() {
                     </div>
                     <div className="flex gap-2 mt-5">
                       <button onClick={() => {
-                        createPayMutation.mutate({ invoiceId: Number(newPayForm.invoiceId), clientId: Number(newPayForm.clientId), amount: Number(newPayForm.amount), method: newPayForm.method, status: "success", paidAt: new Date().toISOString(), notes: newPayForm.notes||null });
+                        createPayMutation.mutate({ invoiceId: newPayForm.invoiceId, organizationId: newPayForm.organizationId, amount: Number(newPayForm.amount), method: newPayForm.method, status: "success", paidAt: new Date().toISOString(), notes: newPayForm.notes || null });
                       }} disabled={createPayMutation.isPending} className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-green-700">標記已付款</button>
                       <button onClick={()=>setShowPayModal(false)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
                     </div>
@@ -627,12 +727,12 @@ export default function StaffDashboard() {
                   <tbody className="divide-y">
                     {[...serviceRecords].sort((a,b)=>b.month.localeCompare(a.month)).map(r => (
                       <tr key={r.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{clientName(r.clientId)}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{orgName(r.organization_id)}</td>
                         <td className="px-4 py-3 text-gray-600">{r.month}</td>
-                        <td className="px-4 py-3">{r.elderCount} 位</td>
-                        <td className="px-4 py-3">{r.conversationCount.toLocaleString()}</td>
-                        <td className="px-4 py-3">{r.alertCount}</td>
-                        <td className="px-4 py-3">{r.activeElders} 位</td>
+                        <td className="px-4 py-3">{r.elder_count} 位</td>
+                        <td className="px-4 py-3">{r.conversation_count.toLocaleString()}</td>
+                        <td className="px-4 py-3">{r.alert_count}</td>
+                        <td className="px-4 py-3">{r.active_elders} 位</td>
                       </tr>
                     ))}
                   </tbody>
@@ -652,7 +752,7 @@ export default function StaffDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
                     <tr>
-                      {["姓名","帳號","角色","Email","狀態"].map(h=>(
+                      {["姓名","Email","角色","狀態"].map(h=>(
                         <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
                       ))}
                     </tr>
@@ -660,11 +760,10 @@ export default function StaffDashboard() {
                   <tbody className="divide-y">
                     {staffList.map(s=>(
                       <tr key={s.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{s.displayName}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-gray-600">{s.username}</td>
-                        <td className="px-4 py-3 text-gray-600">{s.role==="superadmin"?"超級管理員":s.role==="sales"?"業務":s.role==="finance"?"財務":"客服"}</td>
-                        <td className="px-4 py-3 text-gray-600">{s.email}</td>
-                        <td className="px-4 py-3"><Badge status={s.isActive?"active":"suspended"}/></td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{s.person_profiles?.full_name ?? "-"}</td>
+                        <td className="px-4 py-3 text-gray-600">{s.person_profiles?.email ?? "-"}</td>
+                        <td className="px-4 py-3 text-gray-600">{s.role_code === "superadmin" ? "超級管理員" : s.role_code === "sales" ? "業務" : s.role_code === "finance" ? "財務" : "客服"}</td>
+                        <td className="px-4 py-3"><Badge status="active"/></td>
                       </tr>
                     ))}
                   </tbody>
@@ -692,19 +791,13 @@ export default function StaffDashboard() {
                           </select>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">登入帳號</label>
-                          <input value={newStaffForm.username} onChange={e=>setNewStaffForm(f=>({...f,username:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">登入密碼</label>
-                          <input type="password" value={newStaffForm.password} onChange={e=>setNewStaffForm(f=>({...f,password:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
-                        </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Email（登入帳號）</label>
+                        <input value={newStaffForm.email} onChange={e=>setNewStaffForm(f=>({...f,email:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
-                        <input value={newStaffForm.email} onChange={e=>setNewStaffForm(f=>({...f,email:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">初始密碼（可留空自動產生）</label>
+                        <input type="password" value={newStaffForm.password} onChange={e=>setNewStaffForm(f=>({...f,password:e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/>
                       </div>
                     </div>
                     <div className="flex gap-2 mt-5">

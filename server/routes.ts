@@ -328,6 +328,58 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json(data);
   });
 
+  // ── Update Organization Status (activate / suspend) ───────
+  app.patch("/api/organizations/:id", requireAuth, async (req, res) => {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from("organizations")
+      .update({ ...req.body, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
+  // ── Staff Members (HuHu internal team) ────────────────────
+  app.get("/api/staff/members", requireAuth, async (_req, res) => {
+    const staffRoles = ["admin", "superadmin", "sales", "finance", "support"];
+    const { data, error } = await supabaseAdmin
+      .from("organization_members")
+      .select("id, user_id, role_code, title, person_profiles(full_name, email, avatar_url)")
+      .in("role_code", staffRoles)
+      .eq("status", "active");
+
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
+  app.post("/api/staff/members", requireAuth, async (req, res) => {
+    const { email, displayName, role, password } = req.body;
+    if (!email || !displayName || !role)
+      return res.status(400).json({ message: "email、displayName、role 為必填" });
+
+    // Create Supabase Auth user
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password: password || Math.random().toString(36).slice(-10) + "A1!",
+      email_confirm: true,
+      user_metadata: { full_name: displayName, role },
+    });
+    if (authError) return res.status(500).json({ message: authError.message });
+
+    // Create person_profile
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("person_profiles")
+      .insert({ user_id: authData.user!.id, full_name: displayName, email })
+      .select("id")
+      .single();
+    if (profileError) return res.status(500).json({ message: profileError.message });
+
+    res.json({ user: authData.user, profile });
+  });
+
   // ── Audit Logs ─────────────────────────────────────────────
   app.get("/api/audit-logs", requireAuth, async (_req, res) => {
     const { data, error } = await supabaseAdmin
