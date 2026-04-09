@@ -47,13 +47,33 @@ export function useAuth() {
   }, []);
 
   useEffect(() => {
+    // Timeout guard: if getSession takes too long (Safari/iOS), stop loading
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+    }, 6000);
+
     // Get initial session
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
+      clearTimeout(timeoutId);
       setSession(s);
       if (s?.user) {
-        const profile = await fetchUserProfile(s.user);
-        setUser(profile);
+        try {
+          const profile = await fetchUserProfile(s.user);
+          setUser(profile);
+        } catch {
+          // Fallback: basic user info from session
+          setUser({
+            id: s.user.id,
+            email: s.user.email || "",
+            fullName: s.user.user_metadata?.full_name || s.user.email?.split("@")[0] || "",
+            roleCode: s.user.user_metadata?.role,
+            role: s.user.user_metadata?.role || "user",
+          });
+        }
       }
+      setLoading(false);
+    }).catch(() => {
+      clearTimeout(timeoutId);
       setLoading(false);
     });
 
@@ -62,8 +82,18 @@ export function useAuth() {
       async (event, newSession) => {
         setSession(newSession);
         if (newSession?.user) {
-          const profile = await fetchUserProfile(newSession.user);
-          setUser(profile);
+          try {
+            const profile = await fetchUserProfile(newSession.user);
+            setUser(profile);
+          } catch {
+            setUser({
+              id: newSession.user.id,
+              email: newSession.user.email || "",
+              fullName: newSession.user.user_metadata?.full_name || "",
+              roleCode: newSession.user.user_metadata?.role,
+              role: newSession.user.user_metadata?.role || "user",
+            });
+          }
         } else {
           setUser(null);
         }
