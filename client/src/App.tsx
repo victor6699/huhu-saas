@@ -34,7 +34,7 @@ function AppRouter() {
       <Switch>
         <Route path="/" component={() => {
           // Auto-redirect based on role
-          const isStaff = ["admin", "sales", "finance", "support", "superadmin"].includes(user.roleCode || "");
+          const isStaff = ["admin", "org_admin", "sales", "finance", "support", "superadmin", "case_manager"].includes(user.roleCode || "");
           if (isStaff) {
             window.location.hash = "#/staff/dashboard";
             return null;
