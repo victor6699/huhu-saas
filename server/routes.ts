@@ -328,6 +328,176 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json(data);
   });
 
+  // ═══════════════════════════════════════════════════════════════
+  // Org Admin API — /api/org/:orgId/*
+  // 機構管理員專用，只能操作自己所屬的機構
+  // ═══════════════════════════════════════════════════════════════
+
+  // Helper: 確認當前使用者是該機構的 org_admin
+  async function assertOrgAdmin(userId: string, orgId: string): Promise<boolean> {
+    const { data } = await supabaseAdmin
+      .from("organization_members")
+      .select("role_code")
+      .eq("user_id", userId)
+      .eq("organization_id", orgId)
+      .eq("status", "active")
+      .single();
+    return !!data && ["org_admin", "case_manager"].includes(data.role_code);
+  }
+
+  // GET /api/org/:orgId/info — 機構基本資訊
+  app.get("/api/org/:orgId/info", requireAuth, async (req, res) => {
+    const { orgId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { data, error } = await supabaseAdmin.from("organizations").select("*").eq("id", orgId).single();
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
+  // GET /api/org/:orgId/members — 照護員列表
+  app.get("/api/org/:orgId/members", requireAuth, async (req, res) => {
+    const { orgId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { data, error } = await supabaseAdmin
+      .from("organization_members")
+      .select("*, person_profiles(full_name, email, avatar_url)")
+      .eq("organization_id", orgId)
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
+  // POST /api/org/:orgId/invite-member — 邀請照護員（建立 Supabase 帳號 + 加入機構）
+  app.post("/api/org/:orgId/invite-member", requireAuth, async (req, res) => {
+    const { orgId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { email, full_name, role_code = "caregiver", title } = req.body;
+    if (!email) return res.status(400).json({ message: "缺少 email" });
+
+    // 建立或找到 Supabase user
+    let userId: string;
+    const { data: existing } = await supabaseAdmin.auth.admin.listUsers();
+    const existingUser = existing?.users?.find((u: any) => u.email === email);
+
+    if (existingUser) {
+      userId = existingUser.id;
+    } else {
+      // 邀請新使用者
+      const { data: invited, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        data: { full_name },
+      });
+      if (inviteErr) return res.status(500).json({ message: inviteErr.message });
+      userId = invited.user.id;
+    }
+
+    // 確保 person_profile 存在
+    const { data: existingProfile } = await supabaseAdmin
+      .from("person_profiles").select("id").eq("user_id", userId).single();
+    if (!existingProfile) {
+      await supabaseAdmin.from("person_profiles").insert({
+        user_id: userId, full_name: full_name || email.split("@")[0], email,
+      });
+    }
+
+    // 加入機構（若已是成員則更新角色）
+    const { data: existingMember } = await supabaseAdmin
+      .from("organization_members").select("id").eq("user_id", userId).eq("organization_id", orgId).single();
+    if (existingMember) {
+      await supabaseAdmin.from("organization_members")
+        .update({ role_code, title, status: "active" }).eq("id", existingMember.id);
+    } else {
+      await supabaseAdmin.from("organization_members").insert({
+        user_id: userId, organization_id: orgId, role_code, title, status: "active",
+      });
+    }
+
+    res.json({ ok: true });
+  });
+
+  // DELETE /api/org/:orgId/members/:memberId — 移除照護員
+  app.delete("/api/org/:orgId/members/:memberId", requireAuth, async (req, res) => {
+    const { orgId, memberId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { error } = await supabaseAdmin
+      .from("organization_members")
+      .update({ status: "inactive" })
+      .eq("id", memberId)
+      .eq("organization_id", orgId);
+    if (error) return res.status(500).json({ message: error.message });
+    res.json({ ok: true });
+  });
+
+  // GET /api/org/:orgId/recipients — 被照護者列表
+  app.get("/api/org/:orgId/recipients", requireAuth, async (req, res) => {
+    const { orgId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { data, error } = await supabaseAdmin
+      .from("care_recipients")
+      .select("*, person_profiles(full_name, nickname, phone, email)")
+      .eq("primary_org_id", orgId)
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
+  // POST /api/org/:orgId/recipients — 新增被照護者
+  app.post("/api/org/:orgId/recipients", requireAuth, async (req, res) => {
+    const { orgId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { full_name, nickname, phone, email } = req.body;
+    if (!full_name) return res.status(400).json({ message: "缺少姓名" });
+
+    // 建立 person_profile
+    const { data: profile, error: profileErr } = await supabaseAdmin
+      .from("person_profiles").insert({ full_name, nickname, phone, email }).select().single();
+    if (profileErr) return res.status(500).json({ message: profileErr.message });
+
+    // 建立 care_recipient
+    const { data, error } = await supabaseAdmin
+      .from("care_recipients")
+      .insert({ person_profile_id: profile.id, primary_org_id: orgId, status: "active" })
+      .select().single();
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
+  // GET /api/org/:orgId/subscriptions — 訂閱資訊
+  app.get("/api/org/:orgId/subscriptions", requireAuth, async (req, res) => {
+    const { orgId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { data, error } = await supabaseAdmin
+      .from("subscriptions").select("*, plans(name, features)").eq("organization_id", orgId);
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
+  // GET /api/org/:orgId/invoices — 帳單列表
+  app.get("/api/org/:orgId/invoices", requireAuth, async (req, res) => {
+    const { orgId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { data, error } = await supabaseAdmin
+      .from("invoices").select("*").eq("organization_id", orgId)
+      .order("issue_date", { ascending: false });
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
   // ── Update Organization Status (activate / suspend) ───────
   app.patch("/api/organizations/:id", requireAuth, async (req, res) => {
     const { id } = req.params;

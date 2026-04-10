@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { useAuth } from "@/hooks/use-auth";
 import LoginPage from "@/pages/LoginPage";
 import StaffDashboard from "@/pages/StaffDashboard";
+import OrgDashboard from "@/pages/OrgDashboard";
 import ClientPortal from "@/pages/ClientPortal";
 import NotFound from "@/pages/not-found";
 
@@ -34,15 +35,21 @@ function AppRouter() {
       <Switch>
         <Route path="/" component={() => {
           // Auto-redirect based on role
-          const isStaff = ["admin", "org_admin", "sales", "finance", "support", "superadmin", "case_manager"].includes(user.roleCode || "");
-          if (isStaff) {
+          const isHuhuStaff = ["admin", "sales", "finance", "support", "superadmin"].includes(user.roleCode || "");
+          const isOrgAdmin = ["org_admin", "case_manager"].includes(user.roleCode || "");
+          if (isHuhuStaff) {
             window.location.hash = "#/staff/dashboard";
+            return null;
+          }
+          if (isOrgAdmin) {
+            window.location.hash = "#/org/overview";
             return null;
           }
           window.location.hash = "#/portal/overview";
           return null;
         }} />
         <Route path="/staff/:rest*" component={StaffDashboard} />
+        <Route path="/org/:rest*" component={OrgDashboard} />
         <Route path="/portal/:rest*" component={ClientPortal} />
         <Route component={NotFound} />
       </Switch>
