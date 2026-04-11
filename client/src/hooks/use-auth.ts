@@ -9,6 +9,7 @@ export type AuthUser = {
   role?: string;                 // from organization_members or metadata
   personProfileId?: string;
   organizationId?: string;
+  orgType?: string;              // individual_family, care_institution, gov_welfare_bureau
   roleCode?: string;             // admin, sales, finance, support, case_manager, etc.
 };
 
@@ -40,6 +41,7 @@ export function useAuth() {
             fullName: me.profile?.full_name || supabaseUser.user_metadata?.full_name || supabaseUser.email?.split("@")[0] || "",
             personProfileId: me.profile?.id,
             organizationId: firstMembership?.organization_id,
+            orgType: firstMembership?.organizations?.org_type,
             roleCode: firstMembership?.role_code,
             role: firstMembership?.role_code || supabaseUser.user_metadata?.role || "user",
           };

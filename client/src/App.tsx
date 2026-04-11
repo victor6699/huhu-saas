@@ -34,17 +34,22 @@ function AppRouter() {
     <Router hook={useHashLocation}>
       <Switch>
         <Route path="/" component={() => {
-          // Auto-redirect based on role
+          // Auto-redirect based on role + org type
           const isHuhuStaff = ["admin", "sales", "finance", "support", "superadmin"].includes(user.roleCode || "");
           const isOrgAdmin = ["org_admin", "case_manager"].includes(user.roleCode || "");
+          const isInstitution = user.orgType === "care_institution" || user.orgType === "gov_welfare_bureau";
+
           if (isHuhuStaff) {
+            // Platform staff → StaffDashboard
             window.location.hash = "#/staff/dashboard";
             return null;
           }
-          if (isOrgAdmin) {
+          if (isOrgAdmin && isInstitution) {
+            // Institution admin (B2B) → OrgDashboard
             window.location.hash = "#/org/overview";
             return null;
           }
+          // B2C subscriber / individual family → ClientPortal
           window.location.hash = "#/portal/overview";
           return null;
         }} />
