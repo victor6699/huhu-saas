@@ -80,18 +80,32 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
       .eq("user_id", userId)
       .single();
 
-    // Get organization memberships
-    const { data: memberships } = await supabaseAdmin
+    // Get organization memberships (without FK join — fetch org details separately)
+    const { data: rawMembers } = await supabaseAdmin
       .from("organization_members")
-      .select("organization_id, role_code, title, organizations(name, org_type)")
+      .select("organization_id, role_code, title")
       .eq("user_id", userId)
       .eq("status", "active");
+
+    // Enrich with organization info
+    const memberships = [];
+    for (const m of rawMembers || []) {
+      const { data: org } = await supabaseAdmin
+        .from("organizations")
+        .select("name, org_type")
+        .eq("id", m.organization_id)
+        .single();
+      memberships.push({
+        ...m,
+        organizations: org || null,
+      });
+    }
 
     res.json({
       id: userId,
       email: req.supabaseUser!.email,
       profile,
-      memberships: memberships || [],
+      memberships,
       role: req.supabaseUser!.role,
     });
   });
