@@ -550,6 +550,50 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json({ user: authData.user, profile });
   });
 
+  // ── Debug / Health Check ────────────────────────────────────
+  app.get("/api/debug/health", async (req, res) => {
+    const envOk = !!process.env.SUPABASE_URL && !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY);
+    let dbOk = false;
+    let tables: string[] = [];
+    try {
+      // Quick test: can supabaseAdmin reach DB?
+      const { data, error } = await supabaseAdmin.from("organizations").select("id").limit(1);
+      dbOk = !error;
+      if (error) tables.push(`organizations: ${error.message}`);
+      // Check critical tables exist
+      for (const t of ["person_profiles", "organization_members", "plans", "subscriptions", "invoices", "payments", "service_records"]) {
+        const { error: e } = await supabaseAdmin.from(t).select("id").limit(1);
+        tables.push(`${t}: ${e ? "ERROR - " + e.message : "OK"}`);
+      }
+    } catch (e: any) {
+      tables.push(`connection_error: ${e.message}`);
+    }
+
+    // Check auth state if token provided
+    let authInfo = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const { data: { user }, error } = await supabaseAdmin.auth.getUser(authHeader.slice(7));
+        authInfo = error ? { error: error.message } : { id: user?.id, email: user?.email };
+      } catch (e: any) {
+        authInfo = { error: e.message };
+      }
+    }
+
+    res.json({
+      ok: envOk && dbOk,
+      env: {
+        SUPABASE_URL: process.env.SUPABASE_URL ? "set" : "MISSING",
+        SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? "set" : "MISSING",
+      },
+      db: dbOk,
+      tables,
+      auth: authInfo,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // ── Audit Logs ─────────────────────────────────────────────
   app.get("/api/audit-logs", requireAuth, async (_req, res) => {
     const { data, error } = await supabaseAdmin

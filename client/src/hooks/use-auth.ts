@@ -17,16 +17,45 @@ export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch extended user profile from DB
+  // Fetch extended user profile — prefer server /api/me (bypasses RLS),
+  // fall back to direct Supabase client queries.
   const fetchUserProfile = useCallback(async (supabaseUser: SupabaseUser): Promise<AuthUser> => {
-    // Get person_profile
+    // ── Strategy 1: server-side /api/me (uses service_role, no RLS issues) ──
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (s?.access_token) {
+        const res = await fetch("/api/me", {
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${s.access_token}`,
+          },
+          credentials: "include",
+        });
+        if (res.ok) {
+          const me = await res.json();
+          const firstMembership = me.memberships?.[0];
+          return {
+            id: me.id,
+            email: me.email || supabaseUser.email || "",
+            fullName: me.profile?.full_name || supabaseUser.user_metadata?.full_name || supabaseUser.email?.split("@")[0] || "",
+            personProfileId: me.profile?.id,
+            organizationId: firstMembership?.organization_id,
+            roleCode: firstMembership?.role_code,
+            role: firstMembership?.role_code || supabaseUser.user_metadata?.role || "user",
+          };
+        }
+      }
+    } catch {
+      // /api/me failed — fall through to direct queries
+    }
+
+    // ── Strategy 2: direct Supabase client (subject to RLS) ──
     const { data: profile } = await supabase
       .from("person_profiles")
       .select("id, full_name, nickname")
       .eq("user_id", supabaseUser.id)
       .single();
 
-    // Get organization membership (first active membership)
     const { data: membership } = await supabase
       .from("organization_members")
       .select("organization_id, role_code, title")
@@ -42,51 +71,62 @@ export function useAuth() {
       personProfileId: profile?.id,
       organizationId: membership?.organization_id,
       roleCode: membership?.role_code,
-      role: membership?.role_code || "user",
+      role: membership?.role_code || supabaseUser.user_metadata?.role || "user",
     };
   }, []);
 
   useEffect(() => {
-    // SSO: if huhu-care passed tokens via URL params, auto-login
-    const urlParams = new URLSearchParams(window.location.search);
-    const ssoAccess = urlParams.get("t");
-    const ssoRefresh = urlParams.get("r");
-    if (ssoAccess) {
-      supabase.auth.setSession({ access_token: ssoAccess, refresh_token: ssoRefresh || "" })
-        .catch(() => {/* ignore SSO errors, fall through to normal auth */});
-      // Clean tokens from URL so they don't stay in browser history
-      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
-    }
-
-    // Timeout guard: if getSession takes too long (Safari/iOS), stop loading
+    // Timeout guard: if auth takes too long (Safari/iOS), stop loading
     const timeoutId = setTimeout(() => {
       setLoading(false);
-    }, 6000);
+    }, 8000);
 
-    // Get initial session
-    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
-      clearTimeout(timeoutId);
-      setSession(s);
-      if (s?.user) {
-        try {
-          const profile = await fetchUserProfile(s.user);
-          setUser(profile);
-        } catch {
-          // Fallback: basic user info from session
-          setUser({
-            id: s.user.id,
-            email: s.user.email || "",
-            fullName: s.user.user_metadata?.full_name || s.user.email?.split("@")[0] || "",
-            roleCode: s.user.user_metadata?.role,
-            role: s.user.user_metadata?.role || "user",
-          });
+    const initAuth = async () => {
+      try {
+        // SSO: if huhu-care passed tokens via URL params, set session FIRST
+        const urlParams = new URLSearchParams(window.location.search);
+        const ssoAccess = urlParams.get("t");
+        const ssoRefresh = urlParams.get("r");
+        if (ssoAccess) {
+          try {
+            await supabase.auth.setSession({
+              access_token: ssoAccess,
+              refresh_token: ssoRefresh || "",
+            });
+          } catch {
+            // SSO failed — fall through to normal auth
+          }
+          // Clean tokens from URL so they don't stay in browser history
+          window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
         }
+
+        // Get session (will now include SSO session if setSession succeeded)
+        const { data: { session: s } } = await supabase.auth.getSession();
+        clearTimeout(timeoutId);
+        setSession(s);
+        if (s?.user) {
+          try {
+            const profile = await fetchUserProfile(s.user);
+            setUser(profile);
+          } catch {
+            // Fallback: basic user info from session
+            setUser({
+              id: s.user.id,
+              email: s.user.email || "",
+              fullName: s.user.user_metadata?.full_name || s.user.email?.split("@")[0] || "",
+              roleCode: s.user.user_metadata?.role,
+              role: s.user.user_metadata?.role || "user",
+            });
+          }
+        }
+        setLoading(false);
+      } catch {
+        clearTimeout(timeoutId);
+        setLoading(false);
       }
-      setLoading(false);
-    }).catch(() => {
-      clearTimeout(timeoutId);
-      setLoading(false);
-    });
+    };
+
+    initAuth();
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
