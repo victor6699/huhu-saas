@@ -16,9 +16,6 @@ export const supabase = createClient(
       detectSessionInUrl: true,
       persistSession: true,
       autoRefreshToken: true,
-      // Safari/iOS: navigator.locks can hang — use a short lock timeout
-      lock: { enabled: false },
-      storageKey: 'huhu-saas-auth',
     },
   },
 );
