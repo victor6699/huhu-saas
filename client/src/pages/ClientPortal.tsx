@@ -109,6 +109,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
         <div className="p-3 border-t border-[#0ABAB5]/30">
           <div className="text-xs text-[#7DDDD9] mb-2 px-1 truncate">{clientLabel}</div>
           {me && <div className="text-xs text-[#A0E7E4] mb-2 px-1">{typeZH[me.clientType] ?? me.clientType} · <Badge status={me.status} /></div>}
+          <a href="https://huhu-care.onrender.com" className="block w-full text-left px-3 py-2 rounded-lg text-sm text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white transition-colors mb-1">🏠 回到 HuHu Care</a>
           <button onClick={logout} className="w-full text-left px-3 py-2 rounded-lg text-sm text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white transition-colors">🚪 登出</button>
         </div>
       </aside>
@@ -149,9 +150,9 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
                   <p className="text-lg font-bold text-[#0ABAB5] mt-1">{activeSub ? (plans.find(p => p.id === activeSub.planId)?.name ?? "載入中") : "未訂閱"}</p>
                   {activeSub && <p className="text-xs text-gray-400 mt-1">{activeSub.billingCycle === "annual" ? "年繳" : "月繳"} · 下次扣款日: {activeSub.nextBillingDate}</p>}
                 </div>
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-4 cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSection("family"); nav("/portal/family"); }}>
                   <p className="text-xs text-gray-500">使用中長輩數</p>
-                  <p className="text-lg font-bold text-blue-700 mt-1">{activeSub?.elderCount ?? 0} 人</p>
+                  <p className="text-lg font-bold text-blue-700 mt-1">{family.length} 人</p>
                 </div>
                 <div className="bg-white rounded-xl border p-4">
                   <p className="text-xs text-gray-500">待付發票</p>
@@ -198,7 +199,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
             <div>
               <div className="flex items-center justify-between mb-6">
                 <h1 className="text-xl font-bold text-gray-900">家人帳號管理</h1>
-                <a href="http://localhost:5000/onboarding" className="px-4 py-2 bg-[#0ABAB5] text-white rounded-lg hover:bg-[#089490] text-sm font-medium flex items-center gap-2 transition-colors">
+                <a href="https://huhu-care.onrender.com/onboarding" className="px-4 py-2 bg-[#0ABAB5] text-white rounded-lg hover:bg-[#089490] text-sm font-medium flex items-center gap-2 transition-colors">
                   <span>➕</span> <span className="hidden sm:inline">新增家人</span>
                 </a>
               </div>
@@ -208,7 +209,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
                    <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center text-3xl mb-4">👥</div>
                    <h3 className="text-lg font-bold text-gray-800 mb-1">尚無家屬資料</h3>
                    <p className="text-gray-500 text-sm mb-6 max-w-sm">您尚未加入任何家人至您的帳號群組中。點擊下方按鈕開始為長輩建立專屬健康助理。</p>
-                   <a href="http://localhost:5000/onboarding" className="px-6 py-2.5 bg-[#0ABAB5] text-white rounded-lg font-medium hover:bg-[#089490] transition-colors shadow-sm">
+                   <a href="https://huhu-care.onrender.com/onboarding" className="px-6 py-2.5 bg-[#0ABAB5] text-white rounded-lg font-medium hover:bg-[#089490] transition-colors shadow-sm">
                      新增家人帳號
                    </a>
                 </div>
@@ -248,10 +249,10 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 pt-4 border-t border-gray-100">
-                           <a href="http://localhost:5000/#/" className="text-center py-2 text-sm text-[#0ABAB5] border border-[#0ABAB5] rounded-lg hover:bg-[#F0FEFE] font-medium transition-colors">
+                           <a href="https://huhu-care.onrender.com/#/" className="text-center py-2 text-sm text-[#0ABAB5] border border-[#0ABAB5] rounded-lg hover:bg-[#F0FEFE] font-medium transition-colors">
                              開啟健康儀表板
                            </a>
-                           <a href={`http://localhost:5000/chat?id=${member.id}`} className="text-center py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-black font-medium transition-colors">
+                           <a href={`https://huhu-care.onrender.com/chat?id=${member.id}`} className="text-center py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-black font-medium transition-colors">
                              開始對話
                            </a>
                         </div>

@@ -322,24 +322,52 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   app.get("/api/portal/family", requireAuth, async (req, res) => {
-    const { data: membership } = await supabaseAdmin
-      .from("organization_members")
-      .select("organization_id")
-      .eq("user_id", req.supabaseUser!.id)
-      .eq("status", "active")
-      .limit(1)
-      .single();
+    try {
+      const userId = req.supabaseUser!.id;
 
-    if (!membership) return res.json([]);
+      // Strategy 1: via care_relationships (B2C family → elder)
+      const { data: personProfile } = await supabaseAdmin
+        .from("person_profiles").select("id").eq("user_id", userId).single();
 
-    const { data, error } = await supabaseAdmin
-      .from("care_recipients")
-      .select("*, person_profiles(*)")
-      .eq("primary_org_id", membership.organization_id)
-      .order("created_at", { ascending: false });
+      if (personProfile) {
+        const { data: rels } = await supabaseAdmin
+          .from("care_relationships")
+          .select("care_recipient_id, relationship_type, care_recipients(*, person_profiles(*))")
+          .eq("related_person_id", personProfile.id)
+          .eq("status", "active");
 
-    if (error) return res.status(500).json({ message: error.message });
-    res.json(data);
+        if (rels && rels.length > 0) {
+          const members = rels.map((r: any) => ({
+            ...r.care_recipients,
+            relationship_type: r.relationship_type,
+          }));
+          return res.json(members);
+        }
+      }
+
+      // Strategy 2: via organization (institution → care_recipients)
+      const { data: membership } = await supabaseAdmin
+        .from("organization_members")
+        .select("organization_id")
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .limit(1)
+        .single();
+
+      if (!membership) return res.json([]);
+
+      const { data, error } = await supabaseAdmin
+        .from("care_recipients")
+        .select("*, person_profiles(*)")
+        .eq("primary_org_id", membership.organization_id)
+        .order("created_at", { ascending: false });
+
+      if (error) return res.status(500).json({ message: error.message });
+      res.json(data || []);
+    } catch (err) {
+      console.error("[portal/family] error:", err);
+      res.json([]);
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════
