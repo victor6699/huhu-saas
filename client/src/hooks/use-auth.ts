@@ -25,13 +25,18 @@ export function useAuth() {
     try {
       const { data: { session: s } } = await supabase.auth.getSession();
       if (s?.access_token) {
+        // Add 5-second timeout to prevent hanging on slow connections (iPad)
+        const controller = new AbortController();
+        const timeoutHandle = setTimeout(() => controller.abort(), 5000);
         const res = await fetch("/api/me", {
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${s.access_token}`,
           },
           credentials: "include",
+          signal: controller.signal,
         });
+        clearTimeout(timeoutHandle);
         if (res.ok) {
           const me = await res.json();
           const firstMembership = me.memberships?.[0];
@@ -48,32 +53,44 @@ export function useAuth() {
         }
       }
     } catch {
-      // /api/me failed — fall through to direct queries
+      // /api/me failed or timed out — fall through to direct queries
+    }
+    // ── Strategy 2: direct Supabase client (subject to RLS) ──
+    try {
+      const { data: profile } = await supabase
+        .from("person_profiles")
+        .select("id, full_name, nickname")
+        .eq("user_id", supabaseUser.id)
+        .single();
+
+      const { data: membership } = await supabase
+        .from("organization_members")
+        .select("organization_id, role_code, title")
+        .eq("user_id", supabaseUser.id)
+        .eq("status", "active")
+        .limit(1)
+        .single();
+
+      return {
+        id: supabaseUser.id,
+        email: supabaseUser.email || "",
+        fullName: profile?.full_name || supabaseUser.user_metadata?.full_name || supabaseUser.email?.split("@")[0] || "",
+        personProfileId: profile?.id,
+        organizationId: membership?.organization_id,
+        roleCode: membership?.role_code || supabaseUser.user_metadata?.role,
+        role: membership?.role_code || supabaseUser.user_metadata?.role || "user",
+      };
+    } catch {
+      // Strategy 2 also failed — return basic info from user_metadata
     }
 
-    // ── Strategy 2: direct Supabase client (subject to RLS) ──
-    const { data: profile } = await supabase
-      .from("person_profiles")
-      .select("id, full_name, nickname")
-      .eq("user_id", supabaseUser.id)
-      .single();
-
-    const { data: membership } = await supabase
-      .from("organization_members")
-      .select("organization_id, role_code, title")
-      .eq("user_id", supabaseUser.id)
-      .eq("status", "active")
-      .limit(1)
-      .single();
-
+    // ── Strategy 3: pure user_metadata fallback ──
     return {
       id: supabaseUser.id,
       email: supabaseUser.email || "",
-      fullName: profile?.full_name || supabaseUser.user_metadata?.full_name || supabaseUser.email?.split("@")[0] || "",
-      personProfileId: profile?.id,
-      organizationId: membership?.organization_id,
-      roleCode: membership?.role_code,
-      role: membership?.role_code || supabaseUser.user_metadata?.role || "user",
+      fullName: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split("@")[0] || "",
+      roleCode: supabaseUser.user_metadata?.role,
+      role: supabaseUser.user_metadata?.role || "user",
     };
   }, []);
 

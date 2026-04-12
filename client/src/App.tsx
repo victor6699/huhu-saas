@@ -35,9 +35,15 @@ function AppRouter() {
       <Switch>
         <Route path="/" component={() => {
           // Auto-redirect based on role + org type
-          const isHuhuStaff = ["admin", "sales", "finance", "support", "superadmin"].includes(user.roleCode || "");
-          const isOrgAdmin = ["org_admin", "case_manager"].includes(user.roleCode || "");
+          // Check both roleCode (from org membership) and role (from user_metadata fallback)
+          const effectiveRole = user.roleCode || user.role || "";
+          const staffRoles = ["admin", "sales", "finance", "support", "superadmin"];
+          const orgAdminRoles = ["org_admin", "case_manager"];
+          const isHuhuStaff = staffRoles.includes(effectiveRole);
+          const isOrgAdmin = orgAdminRoles.includes(effectiveRole);
           const isInstitution = user.orgType === "care_institution" || user.orgType === "gov_welfare_bureau";
+
+          console.log("[routing]", { roleCode: user.roleCode, role: user.role, effectiveRole, isHuhuStaff, isOrgAdmin, orgType: user.orgType });
 
           if (isHuhuStaff) {
             // Platform staff → StaffDashboard
