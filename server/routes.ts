@@ -661,6 +661,258 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     });
   });
 
+  // ═══════════════════════════════════════════════════════════════
+  // CRM — 使用者管理 (all registered users across huhu-care & saas)
+  // ═══════════════════════════════════════════════════════════════
+
+  // GET /api/crm/users — List all Supabase auth users with profiles & memberships
+  app.get("/api/crm/users", requireAuth, async (_req, res) => {
+    try {
+      // Fetch all auth users (paginated — up to 1000)
+      const allUsers: any[] = [];
+      let page = 1;
+      while (true) {
+        const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 100 });
+        if (error || !users || users.length === 0) break;
+        allUsers.push(...users);
+        if (users.length < 100) break;
+        page++;
+        if (page > 10) break; // safety cap
+      }
+
+      // Fetch all person_profiles (tags & notes columns may not exist yet — graceful fallback)
+      let profiles: any[] | null = null;
+      const { data: profileData, error: profileErr } = await supabaseAdmin
+        .from("person_profiles")
+        .select("id, user_id, full_name, nickname, phone, email, avatar_url, created_at");
+      profiles = profileData;
+
+      // Fetch all organization_members
+      const { data: memberships } = await supabaseAdmin
+        .from("organization_members")
+        .select("user_id, organization_id, role_code, title, status");
+
+      // Fetch all organizations (for names)
+      const { data: orgs } = await supabaseAdmin
+        .from("organizations")
+        .select("id, name, org_type");
+
+      // Fetch care_recipients (to identify elders)
+      const { data: careRecipients } = await supabaseAdmin
+        .from("care_recipients")
+        .select("id, person_profile_id, primary_org_id, status");
+
+      // Fetch care_relationships (to show family → elder links)
+      const { data: careRels } = await supabaseAdmin
+        .from("care_relationships")
+        .select("id, care_recipient_id, related_person_id, relationship_type, status");
+
+      const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
+      const orgMap = new Map((orgs || []).map(o => [o.id, o]));
+
+      const result = allUsers.map(u => {
+        const profile = profileMap.get(u.id);
+        const userMemberships = (memberships || [])
+          .filter(m => m.user_id === u.id)
+          .map(m => ({
+            ...m,
+            org_name: orgMap.get(m.organization_id)?.name,
+            org_type: orgMap.get(m.organization_id)?.org_type,
+          }));
+
+        // Is this user an elder (care_recipient)?
+        const elderRecord = profile
+          ? (careRecipients || []).find(cr => cr.person_profile_id === profile.id)
+          : null;
+
+        // Care relationships involving this user
+        const relationsAsFamily = profile
+          ? (careRels || []).filter(r => r.related_person_id === profile.id)
+          : [];
+        const relationsAsElder = elderRecord
+          ? (careRels || []).filter(r => r.care_recipient_id === elderRecord.id)
+          : [];
+
+        // Determine user type from metadata / memberships
+        const role = u.user_metadata?.role || "unknown";
+        const staffRoles = ["admin", "superadmin", "sales", "finance", "support"];
+        const isStaff = userMemberships.some(m => staffRoles.includes(m.role_code));
+
+        let userType = role; // family, caregiver, user (elder)
+        if (isStaff) userType = "staff";
+        if (elderRecord) userType = "elder";
+
+        return {
+          id: u.id,
+          email: u.email,
+          fullName: profile?.full_name || u.user_metadata?.full_name || "",
+          nickname: profile?.nickname || "",
+          phone: profile?.phone || u.phone || "",
+          avatarUrl: profile?.avatar_url || "",
+          role,
+          userType,
+          tags: [],
+          notes: "",
+          personProfileId: profile?.id || null,
+          memberships: userMemberships,
+          elderRecord: elderRecord || null,
+          careRelationships: {
+            asFamily: relationsAsFamily.length,
+            asElder: relationsAsElder.length,
+          },
+          createdAt: u.created_at,
+          lastSignInAt: u.last_sign_in_at,
+          emailConfirmed: !!u.email_confirmed_at,
+          source: u.app_metadata?.provider || "email",
+        };
+      });
+
+      // Sort: newest first
+      result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      res.json(result);
+    } catch (err: any) {
+      console.error("[crm/users] error:", err);
+      res.status(500).json({ message: err.message || "無法取得使用者列表" });
+    }
+  });
+
+  // PATCH /api/crm/users/:userId — Update user metadata (role, fullName, phone)
+  app.patch("/api/crm/users/:userId", requireAuth, async (req, res) => {
+    const { userId } = req.params;
+    const { role, fullName, phone } = req.body;
+
+    // Update auth metadata if role changed
+    if (role) {
+      await supabaseAdmin.auth.admin.updateUserById(userId, {
+        user_metadata: { role },
+      });
+    }
+
+    // Update person_profile
+    const updateData: any = {};
+    if (fullName) updateData.full_name = fullName;
+    if (phone !== undefined) updateData.phone = phone;
+
+    if (Object.keys(updateData).length > 0) {
+      const { error } = await supabaseAdmin
+        .from("person_profiles")
+        .update(updateData)
+        .eq("user_id", userId);
+
+      if (error) return res.status(500).json({ message: error.message });
+    }
+
+    res.json({ ok: true });
+  });
+
+  // POST /api/crm/batch-import — Batch create users from uploaded data
+  app.post("/api/crm/batch-import", requireAuth, async (req, res) => {
+    const { rows } = req.body; // Array of { email, password?, fullName, phone?, role?, orgName?, orgType? }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ message: "請提供至少一筆資料" });
+    }
+    if (rows.length > 200) {
+      return res.status(400).json({ message: "單次最多匯入 200 筆" });
+    }
+
+    const results: { email: string; status: string; message?: string }[] = [];
+
+    for (const row of rows) {
+      try {
+        const email = (row.email || "").trim().toLowerCase();
+        if (!email) {
+          results.push({ email: "(空)", status: "error", message: "缺少 Email" });
+          continue;
+        }
+
+        const fullName = (row.fullName || row.full_name || row.name || email.split("@")[0]).trim();
+        const phone = (row.phone || "").trim();
+        const role = (row.role || "user").trim();
+        const password = (row.password || "").trim() || `Huhu${Math.random().toString(36).slice(-6)}!`;
+
+        // Check if user already exists
+        const { data: existing } = await supabaseAdmin.auth.admin.listUsers();
+        const existingUser = existing?.users?.find((u: any) => u.email === email);
+
+        let userId: string;
+        if (existingUser) {
+          userId = existingUser.id;
+          results.push({ email, status: "skipped", message: "帳號已存在" });
+        } else {
+          // Create auth user
+          const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: { full_name: fullName, role },
+          });
+          if (authErr) {
+            results.push({ email, status: "error", message: authErr.message });
+            continue;
+          }
+          userId = authData.user!.id;
+
+          // Create person_profile
+          await supabaseAdmin.from("person_profiles").insert({
+            user_id: userId,
+            full_name: fullName,
+            phone: phone || null,
+            email,
+          });
+
+          // If org info provided, create or link organization
+          const orgName = (row.orgName || row.org_name || "").trim();
+          const orgType = (row.orgType || row.org_type || "individual_family").trim();
+          if (orgName) {
+            // Check if org exists
+            const { data: existingOrg } = await supabaseAdmin
+              .from("organizations")
+              .select("id")
+              .eq("name", orgName)
+              .single();
+
+            const orgId = existingOrg?.id;
+            if (orgId) {
+              // Add as member
+              await supabaseAdmin.from("organization_members").insert({
+                user_id: userId,
+                organization_id: orgId,
+                role_code: role === "org_admin" ? "org_admin" : "member",
+                status: "active",
+              });
+            } else {
+              // Create new org and add as admin
+              const { data: newOrg } = await supabaseAdmin
+                .from("organizations")
+                .insert({ name: orgName, org_type: orgType, status: "active" })
+                .select("id")
+                .single();
+              if (newOrg) {
+                await supabaseAdmin.from("organization_members").insert({
+                  user_id: userId,
+                  organization_id: newOrg.id,
+                  role_code: "org_admin",
+                  status: "active",
+                });
+              }
+            }
+          }
+
+          results.push({ email, status: "created" });
+        }
+      } catch (err: any) {
+        results.push({ email: row.email || "?", status: "error", message: err.message });
+      }
+    }
+
+    const created = results.filter(r => r.status === "created").length;
+    const skipped = results.filter(r => r.status === "skipped").length;
+    const errors = results.filter(r => r.status === "error").length;
+
+    res.json({ total: rows.length, created, skipped, errors, results });
+  });
+
   // ── Audit Logs ─────────────────────────────────────────────
   app.get("/api/audit-logs", requireAuth, async (_req, res) => {
     const { data, error } = await supabaseAdmin

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, forceLogout } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -89,6 +89,26 @@ type ServiceRecord = {
   alert_count: number;
   active_elders: number;
 };
+type CrmUser = {
+  id: string;
+  email: string;
+  fullName: string;
+  nickname: string;
+  phone: string;
+  avatarUrl: string;
+  role: string;
+  userType: string;
+  tags: string[];
+  notes: string;
+  personProfileId: string | null;
+  memberships: { organization_id: string; role_code: string; org_name?: string; org_type?: string; status: string }[];
+  elderRecord: { id: string; person_profile_id: string; primary_org_id: string; status: string } | null;
+  careRelationships: { asFamily: number; asElder: number };
+  createdAt: string;
+  lastSignInAt: string | null;
+  emailConfirmed: boolean;
+  source: string;
+};
 
 // ── Form initial states ────────────────────────────────────────────────────────
 const INITIAL_ORG_FORM = {
@@ -127,6 +147,15 @@ const STATUS_ZH: Record<string, string> = {
   paid: "已付款", unpaid: "待付款", overdue: "逾期", success: "成功",
   failed: "失敗", refunded: "退款", trial: "試用",
 };
+const USER_TYPE_LABEL: Record<string, string> = {
+  elder: "長輩", family: "家人", caregiver: "照護員", staff: "員工",
+  user: "使用者", unknown: "未分類",
+};
+const USER_TYPE_BADGE: Record<string, string> = {
+  elder: "bg-purple-100 text-purple-800", family: "bg-blue-100 text-blue-800",
+  caregiver: "bg-green-100 text-green-800", staff: "bg-amber-100 text-amber-800",
+  user: "bg-gray-100 text-gray-600", unknown: "bg-gray-100 text-gray-400",
+};
 const METHOD_ZH: Record<string, string> = {
   newebpay: "藍新金流", ecpay: "綠界科技", stripe: "Stripe",
   bank_transfer: "銀行匯款", manual: "手動記錄",
@@ -149,7 +178,7 @@ function Stat({ label, value, sub, color = "blue" }: { label: string; value: str
 
 export default function StaffDashboard() {
   const { toast } = useToast();
-  const [section, setSection] = useState<"overview"|"clients"|"subscriptions"|"invoices"|"payments"|"service"|"staff">("overview");
+  const [section, setSection] = useState<"overview"|"users"|"clients"|"subscriptions"|"invoices"|"payments"|"service"|"staff">("overview");
 
   // Form state (all IDs are strings / UUIDs)
   const [newInvForm, setNewInvForm] = useState({ organizationId: "", subscriptionId: "", periodStart: "", periodEnd: "", issueDate: "", dueDate: "", subtotal: "", tax: "5", notes: "" });
@@ -162,6 +191,15 @@ export default function StaffDashboard() {
   const [newSubForm, setNewSubForm] = useState({ organizationId: "", planId: "", billingCycle: "monthly", elderCount: "1", amount: "", startDate: "", endDate: "" });
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [newStaffForm, setNewStaffForm] = useState(INITIAL_STAFF_FORM);
+  // CRM state
+  const [userTypeFilter, setUserTypeFilter] = useState<string>("all");
+  const [userSearch, setUserSearch] = useState("");
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importRows, setImportRows] = useState<any[]>([]);
+  const [importResult, setImportResult] = useState<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pasteText, setPasteText] = useState("");
 
   // ── Queries ────────────────────────────────────────────────
   const { data: me } = useQuery<Me>({ queryKey: ["/api/me"] });
@@ -172,6 +210,7 @@ export default function StaffDashboard() {
   const { data: payments = [] } = useQuery<Payment[]>({ queryKey: ["/api/payments"] });
   const { data: serviceRecords = [] } = useQuery<ServiceRecord[]>({ queryKey: ["/api/service-records"] });
   const { data: plans = [] } = useQuery<Plan[]>({ queryKey: ["/api/plans"] });
+  const { data: crmUsers = [], isLoading: crmLoading } = useQuery<CrmUser[]>({ queryKey: ["/api/crm/users"] });
 
   // ── Computed stats (no separate stats endpoint needed) ─────
   const stats = useMemo(() => {
@@ -185,8 +224,14 @@ export default function StaffDashboard() {
     const mrr = subscriptions
       .filter(s => s.status === "active")
       .reduce((sum, s) => sum + (s.billing_cycle === "annual" ? Number(s.amount) / 12 : Number(s.amount)), 0);
-    return { activeClients, pendingClients, activeSubscriptions, unpaidInvoices, unpaidAmount, paidAmount, mrr };
-  }, [organizations, subscriptions, invoices, payments]);
+    const totalUsers = crmUsers.length;
+    const newUsersThisWeek = crmUsers.filter(u => {
+      const d = new Date(u.createdAt);
+      const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+      return d >= weekAgo;
+    }).length;
+    return { activeClients, pendingClients, activeSubscriptions, unpaidInvoices, unpaidAmount, paidAmount, mrr, totalUsers, newUsersThisWeek };
+  }, [organizations, subscriptions, invoices, payments, crmUsers]);
 
   // ── Mutations ──────────────────────────────────────────────
   const activateMutation = useMutation({
@@ -238,6 +283,17 @@ export default function StaffDashboard() {
       toast({ title: "新增失敗", description: error.message, variant: "destructive" });
     },
   });
+  const batchImportMutation = useMutation({
+    mutationFn: (body: any) => apiRequest("POST", "/api/crm/batch-import", body),
+    onSuccess: (data: any) => {
+      setImportResult(data);
+      queryClient.invalidateQueries({ queryKey: ["/api/crm/users"] });
+      toast({ title: `匯入完成：${data.created} 筆成功，${data.skipped} 筆略過，${data.errors} 筆失敗` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "匯入失敗", description: error.message, variant: "destructive" });
+    },
+  });
   const logout = async () => { await forceLogout(); };
 
   // ── Helpers ────────────────────────────────────────────────
@@ -255,6 +311,7 @@ export default function StaffDashboard() {
 
   const navItems = [
     { key: "overview", label: "總覽", icon: "📊" },
+    { key: "users", label: "使用者 CRM", icon: "👤" },
     { key: "clients", label: "客戶管理", icon: "🏢" },
     { key: "subscriptions", label: "訂閱管理", icon: "📋" },
     { key: "invoices", label: "帳單管理", icon: "🧾" },
@@ -304,9 +361,11 @@ export default function StaffDashboard() {
                 <Stat label="月均收入 (MRR)" value={`NT$ ${fmt(stats.mrr)}`} color="green" />
                 <Stat label="待收帳款" value={`NT$ ${fmt(stats.unpaidAmount)}`} sub={`${stats.unpaidInvoices} 張帳單`} color="red" />
               </div>
-              <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <Stat label="累計已收款" value={`NT$ ${fmt(stats.paidAmount)}`} color="green" />
                 <Stat label="進行中訂閱" value={stats.activeSubscriptions} sub="份" color="blue" />
+                <Stat label="總使用者" value={stats.totalUsers} sub="人" color="blue" />
+                <Stat label="本週新增" value={stats.newUsersThisWeek} sub="人" color="green" />
               </div>
               {/* Recent invoices */}
               <div className="bg-white rounded-xl border">
@@ -331,6 +390,270 @@ export default function StaffDashboard() {
               </div>
             </div>
           )}
+
+          {/* ── Users CRM ── */}
+          {section === "users" && (() => {
+            const filtered = crmUsers.filter(u => {
+              if (userTypeFilter !== "all" && u.userType !== userTypeFilter) return false;
+              if (userSearch) {
+                const q = userSearch.toLowerCase();
+                return (u.email?.toLowerCase().includes(q) || u.fullName?.toLowerCase().includes(q) || u.phone?.includes(q));
+              }
+              return true;
+            });
+            const typeCounts: Record<string, number> = {};
+            crmUsers.forEach(u => { typeCounts[u.userType] = (typeCounts[u.userType] || 0) + 1; });
+
+            const normalizeRows = (json: any[]) => json.map((row: any) => ({
+              email: row.email || row.Email || row.EMAIL || row["電子郵件"] || "",
+              fullName: row.fullName || row.full_name || row.name || row.Name || row["姓名"] || row["名稱"] || "",
+              phone: row.phone || row.Phone || row["電話"] || "",
+              password: row.password || row.Password || row["密碼"] || "",
+              role: row.role || row.Role || row["角色"] || "user",
+              orgName: row.orgName || row.org_name || row.organization || row["機構"] || "",
+              orgType: row.orgType || row.org_type || row["機構類型"] || "individual_family",
+            }));
+
+            const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              e.target.value = "";
+
+              // CSV handling (no library needed)
+              if (file.name.endsWith(".csv")) {
+                const text = await file.text();
+                const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+                if (lines.length < 2) { toast({ title: "CSV 檔案至少需要標題行+一筆資料", variant: "destructive" }); return; }
+                const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
+                const json = lines.slice(1).map(line => {
+                  const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
+                  const obj: any = {};
+                  headers.forEach((h, i) => { obj[h] = vals[i] || ""; });
+                  return obj;
+                });
+                setImportRows(normalizeRows(json));
+                setImportResult(null);
+                setShowImportModal(true);
+                return;
+              }
+
+              // Excel handling (dynamic import)
+              try {
+                const XLSX = await import("xlsx");
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  try {
+                    const data = new Uint8Array(ev.target?.result as ArrayBuffer);
+                    const wb = XLSX.read(data, { type: "array" });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(ws) as any[];
+                    setImportRows(normalizeRows(json));
+                    setImportResult(null);
+                    setShowImportModal(true);
+                  } catch { toast({ title: "無法解析 Excel 檔案", variant: "destructive" }); }
+                };
+                reader.readAsArrayBuffer(file);
+              } catch {
+                toast({ title: "Excel 解析庫未安裝，請改用 CSV 格式", variant: "destructive" });
+              }
+            };
+
+            return (
+              <div>
+                {/* Header + Actions */}
+                <div className="flex items-center justify-between mb-4">
+                  <h1 className="text-xl font-bold text-gray-900">使用者 CRM</h1>
+                  <div className="flex gap-2">
+                    <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileUpload} />
+                    <button onClick={() => fileInputRef.current?.click()} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700">📥 匯入 Excel/CSV</button>
+                    <button onClick={() => { setPasteMode(true); setShowImportModal(true); setImportResult(null); setImportRows([]); }} className="px-4 py-2 border border-green-600 text-green-700 rounded-lg text-sm font-medium hover:bg-green-50">📋 貼上資料</button>
+                  </div>
+                </div>
+
+                {/* Stats row */}
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
+                  <button onClick={() => setUserTypeFilter("all")} className={`rounded-xl border p-3 text-center transition-colors ${userTypeFilter === "all" ? "bg-blue-50 border-blue-300" : "bg-white hover:bg-gray-50"}`}>
+                    <p className="text-lg font-bold text-blue-600">{crmUsers.length}</p>
+                    <p className="text-xs text-gray-500">全部</p>
+                  </button>
+                  {Object.entries(USER_TYPE_LABEL).map(([key, label]) => (
+                    <button key={key} onClick={() => setUserTypeFilter(key)} className={`rounded-xl border p-3 text-center transition-colors ${userTypeFilter === key ? "bg-blue-50 border-blue-300" : "bg-white hover:bg-gray-50"}`}>
+                      <p className="text-lg font-bold">{typeCounts[key] || 0}</p>
+                      <p className="text-xs text-gray-500">{label}</p>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search */}
+                <div className="mb-4">
+                  <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜尋 Email、姓名、電話..." className="w-full md:w-80 border rounded-lg px-3 py-2 text-sm" />
+                </div>
+
+                {/* User Table */}
+                {crmLoading ? (
+                  <div className="bg-white rounded-xl border p-12 text-center text-gray-400">載入中...</div>
+                ) : (
+                  <div className="bg-white rounded-xl border overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b">
+                        <tr>
+                          {["姓名","Email","電話","類型","來源","機構/組織","照護關係","註冊日期","最後登入"].map(h => (
+                            <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {filtered.map(u => (
+                          <tr key={u.id} className="hover:bg-gray-50">
+                            <td className="px-3 py-3">
+                              <div className="font-medium text-gray-900">{u.fullName || "-"}</div>
+                              {u.nickname && <div className="text-xs text-gray-400">{u.nickname}</div>}
+                            </td>
+                            <td className="px-3 py-3 text-gray-600 text-xs">{u.email}</td>
+                            <td className="px-3 py-3 text-gray-600">{u.phone || "-"}</td>
+                            <td className="px-3 py-3">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${USER_TYPE_BADGE[u.userType] || "bg-gray-100 text-gray-600"}`}>
+                                {USER_TYPE_LABEL[u.userType] || u.userType}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-xs text-gray-500">{u.source}</td>
+                            <td className="px-3 py-3 text-xs text-gray-600">
+                              {u.memberships.length > 0
+                                ? u.memberships.map((m, i) => (
+                                    <div key={i}>{m.org_name || "?"} <span className="text-gray-400">({m.role_code})</span></div>
+                                  ))
+                                : <span className="text-gray-400">-</span>
+                              }
+                            </td>
+                            <td className="px-3 py-3 text-xs text-gray-600">
+                              {u.careRelationships.asFamily > 0 && <div>家人關係 x{u.careRelationships.asFamily}</div>}
+                              {u.careRelationships.asElder > 0 && <div>被照護 x{u.careRelationships.asElder}</div>}
+                              {u.careRelationships.asFamily === 0 && u.careRelationships.asElder === 0 && <span className="text-gray-400">-</span>}
+                            </td>
+                            <td className="px-3 py-3 text-xs text-gray-500">{u.createdAt?.slice(0, 10)}</td>
+                            <td className="px-3 py-3 text-xs text-gray-500">{u.lastSignInAt ? new Date(u.lastSignInAt).toLocaleDateString("zh-TW") : "從未"}</td>
+                          </tr>
+                        ))}
+                        {filtered.length === 0 && (
+                          <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">無符合條件的使用者</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Batch Import Modal */}
+                {showImportModal && (
+                  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl w-full max-w-3xl p-6 max-h-[80vh] overflow-y-auto">
+                      <h2 className="text-lg font-bold mb-2">批次匯入使用者</h2>
+                      <p className="text-sm text-gray-500 mb-4">
+                        {importRows.length > 0 ? `已解析 ${importRows.length} 筆資料，確認後將建立帳號。` : pasteMode ? "請貼上 CSV 格式的資料（第一行為標題）" : ""}
+                      </p>
+
+                      {/* Paste mode textarea */}
+                      {pasteMode && importRows.length === 0 && !importResult && (
+                        <div className="mb-4">
+                          <textarea
+                            value={pasteText}
+                            onChange={e => setPasteText(e.target.value)}
+                            placeholder={"email,姓名,電話,角色,密碼\njohn@example.com,王大明,0912345678,user,Password1!\njane@example.com,陳小美,0923456789,family,"}
+                            className="w-full border rounded-lg px-3 py-2 text-sm font-mono h-40"
+                          />
+                          <div className="flex gap-2 mt-2">
+                            <button onClick={() => {
+                              const lines = pasteText.split("\n").map(l => l.trim()).filter(Boolean);
+                              if (lines.length < 2) { toast({ title: "至少需要標題行+一筆資料" }); return; }
+                              const sep = lines[0].includes("\t") ? "\t" : ",";
+                              const headers = lines[0].split(sep).map(h => h.trim().replace(/^"|"$/g, ""));
+                              const json = lines.slice(1).map(line => {
+                                const vals = line.split(sep).map(v => v.trim().replace(/^"|"$/g, ""));
+                                const obj: any = {};
+                                headers.forEach((h, i) => { obj[h] = vals[i] || ""; });
+                                return obj;
+                              });
+                              setImportRows(normalizeRows(json));
+                            }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">解析資料</button>
+                            <button onClick={() => { setPasteMode(false); setShowImportModal(false); setPasteText(""); }} className="px-4 py-2 border rounded-lg text-sm">取消</button>
+                          </div>
+                        </div>
+                      )}
+
+                      {importResult ? (
+                        <div className="mb-4">
+                          <div className="grid grid-cols-3 gap-3 mb-3">
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                              <p className="text-2xl font-bold text-green-700">{importResult.created}</p>
+                              <p className="text-xs text-green-600">成功建立</p>
+                            </div>
+                            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-center">
+                              <p className="text-2xl font-bold text-yellow-700">{importResult.skipped}</p>
+                              <p className="text-xs text-yellow-600">已存在略過</p>
+                            </div>
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+                              <p className="text-2xl font-bold text-red-700">{importResult.errors}</p>
+                              <p className="text-xs text-red-600">失敗</p>
+                            </div>
+                          </div>
+                          {importResult.results?.filter((r: any) => r.status === "error").length > 0 && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm mb-3">
+                              <p className="font-medium text-red-700 mb-1">錯誤明細：</p>
+                              {importResult.results.filter((r: any) => r.status === "error").map((r: any, i: number) => (
+                                <p key={i} className="text-red-600">{r.email}: {r.message}</p>
+                              ))}
+                            </div>
+                          )}
+                          <button onClick={() => { setShowImportModal(false); setImportRows([]); setImportResult(null); setPasteMode(false); setPasteText(""); }} className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">關閉</button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="bg-white rounded-xl border overflow-x-auto mb-4">
+                            <table className="w-full text-xs">
+                              <thead className="bg-gray-50 border-b">
+                                <tr>
+                                  {["#","Email","姓名","電話","角色","密碼","機構","機構類型"].map(h => (
+                                    <th key={h} className="px-2 py-2 text-left font-medium text-gray-500">{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y">
+                                {importRows.slice(0, 50).map((r, i) => (
+                                  <tr key={i} className="hover:bg-gray-50">
+                                    <td className="px-2 py-1.5 text-gray-400">{i + 1}</td>
+                                    <td className="px-2 py-1.5 font-medium">{r.email || <span className="text-red-400">缺少</span>}</td>
+                                    <td className="px-2 py-1.5">{r.fullName}</td>
+                                    <td className="px-2 py-1.5">{r.phone}</td>
+                                    <td className="px-2 py-1.5">{r.role}</td>
+                                    <td className="px-2 py-1.5 text-gray-400">{r.password ? "***" : "(自動產生)"}</td>
+                                    <td className="px-2 py-1.5">{r.orgName}</td>
+                                    <td className="px-2 py-1.5">{r.orgType}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {importRows.length > 50 && <p className="px-3 py-2 text-xs text-gray-400">... 還有 {importRows.length - 50} 筆</p>}
+                          </div>
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 mb-4">
+                            Excel 欄位對應：email/Email/電子郵件, name/姓名, phone/電話, password/密碼, role/角色 (user/family/caregiver), orgName/機構, orgType/機構類型
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => batchImportMutation.mutate({ rows: importRows })}
+                              disabled={batchImportMutation.isPending}
+                              className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+                            >
+                              {batchImportMutation.isPending ? "匯入中..." : `確認匯入 ${importRows.length} 筆`}
+                            </button>
+                            <button onClick={() => { setShowImportModal(false); setImportRows([]); setPasteMode(false); setPasteText(""); }} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* ── Clients ── */}
           {section === "clients" && (
