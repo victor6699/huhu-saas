@@ -326,22 +326,38 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
       const userId = req.supabaseUser!.id;
 
       // Strategy 1: via care_relationships (B2C family → elder)
+      // Use separate queries to avoid Supabase FK join failure
       const { data: personProfile } = await supabaseAdmin
         .from("person_profiles").select("id").eq("user_id", userId).single();
 
       if (personProfile) {
         const { data: rels } = await supabaseAdmin
           .from("care_relationships")
-          .select("care_recipient_id, relationship_type, care_recipients(*, person_profiles(*))")
+          .select("care_recipient_id, relationship_type")
           .eq("related_person_id", personProfile.id)
           .eq("status", "active");
 
         if (rels && rels.length > 0) {
-          const members = rels.map((r: any) => ({
-            ...r.care_recipients,
-            relationship_type: r.relationship_type,
-          }));
-          return res.json(members);
+          const members = [];
+          for (const r of rels) {
+            const { data: cr } = await supabaseAdmin
+              .from("care_recipients")
+              .select("*")
+              .eq("id", r.care_recipient_id)
+              .single();
+            if (!cr) continue;
+            const { data: profile } = await supabaseAdmin
+              .from("person_profiles")
+              .select("*")
+              .eq("id", cr.person_profile_id)
+              .single();
+            members.push({
+              ...cr,
+              person_profiles: profile || null,
+              relationship_type: r.relationship_type,
+            });
+          }
+          if (members.length > 0) return res.json(members);
         }
       }
 
@@ -356,14 +372,23 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
       if (!membership) return res.json([]);
 
-      const { data, error } = await supabaseAdmin
+      // Also use separate queries here
+      const { data: recipients } = await supabaseAdmin
         .from("care_recipients")
-        .select("*, person_profiles(*)")
+        .select("*")
         .eq("primary_org_id", membership.organization_id)
         .order("created_at", { ascending: false });
 
-      if (error) return res.status(500).json({ message: error.message });
-      res.json(data || []);
+      const results = [];
+      for (const cr of recipients || []) {
+        const { data: profile } = await supabaseAdmin
+          .from("person_profiles")
+          .select("*")
+          .eq("id", cr.person_profile_id)
+          .single();
+        results.push({ ...cr, person_profiles: profile || null });
+      }
+      res.json(results);
     } catch (err) {
       console.error("[portal/family] error:", err);
       res.json([]);
