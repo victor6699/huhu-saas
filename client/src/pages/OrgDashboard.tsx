@@ -118,6 +118,8 @@ function MembersSection({ orgId, members, refetch }: {
 }) {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
+  const [editMemberTarget, setEditMemberTarget] = useState<Member | null>(null);
+  const [memberEditForm, setMemberEditForm] = useState({ role_code: "caregiver", title: "" });
   const [form, setForm] = useState({ email: "", full_name: "", role_code: "caregiver", title: "" });
 
   const inviteMutation = useMutation({
@@ -129,6 +131,13 @@ function MembersSection({ orgId, members, refetch }: {
       refetch();
     },
     onError: (e: any) => toast({ title: "邀請失敗", description: e?.message, variant: "destructive" }),
+  });
+
+  const updateMemberMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: typeof memberEditForm }) =>
+      apiRequest("PATCH", `/api/org/${orgId}/members/${id}`, data),
+    onSuccess: () => { toast({ title: "已更新成員資料" }); setEditMemberTarget(null); refetch(); },
+    onError: (e: any) => toast({ title: "更新失敗", description: e?.message, variant: "destructive" }),
   });
 
   const removeMutation = useMutation({
@@ -215,16 +224,57 @@ function MembersSection({ orgId, members, refetch }: {
                 <td className="px-4 py-3 text-gray-500">{m.title || "—"}</td>
                 <td className="px-4 py-3"><Badge status={m.status} /></td>
                 <td className="px-4 py-3">
-                  {m.role_code !== "org_admin" && (
-                    <button onClick={() => { if (confirm("確定移除此成員？")) removeMutation.mutate(m.id); }}
-                      className="text-xs text-red-500 hover:text-red-700">移除</button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { setEditMemberTarget(m); setMemberEditForm({ role_code: m.role_code, title: m.title || "" }); }}
+                      className="text-xs text-[#0ABAB5] hover:text-[#089490] font-medium">✏️ 編輯</button>
+                    {m.role_code !== "org_admin" && (
+                      <button onClick={() => { if (confirm("確定移除此成員？")) removeMutation.mutate(m.id); }}
+                        className="text-xs text-red-500 hover:text-red-700">移除</button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* Edit Member Modal */}
+      {editMemberTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+            <h3 className="font-bold text-lg mb-4">編輯照護員資料</h3>
+            <p className="text-sm text-gray-500 mb-4">{editMemberTarget.person_profiles?.full_name}</p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">角色</label>
+                <select value={memberEditForm.role_code} onChange={e => setMemberEditForm(p => ({ ...p, role_code: e.target.value }))}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#0ABAB5] focus:outline-none">
+                  <option value="caregiver">照護員</option>
+                  <option value="case_manager">個案管理員</option>
+                  <option value="org_admin">機構管理員</option>
+                  <option value="viewer">檢視者</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">職稱</label>
+                <input value={memberEditForm.title}
+                  onChange={e => setMemberEditForm(p => ({ ...p, title: e.target.value }))}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#0ABAB5] focus:outline-none" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => updateMemberMutation.mutate({ id: editMemberTarget.id, data: memberEditForm })}
+                disabled={updateMemberMutation.isPending}
+                className="flex-1 bg-[#0ABAB5] text-white py-2 rounded-lg text-sm font-medium hover:bg-[#089490] disabled:opacity-50">
+                {updateMemberMutation.isPending ? "儲存中..." : "儲存"}
+              </button>
+              <button onClick={() => setEditMemberTarget(null)}
+                className="flex-1 border py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -237,7 +287,9 @@ function RecipientsSection({ orgId, recipients, refetch }: {
 }) {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
+  const [editTarget, setEditTarget] = useState<CareRecipient | null>(null);
   const [form, setForm] = useState({ full_name: "", phone: "", email: "", nickname: "" });
+  const [editForm, setEditForm] = useState({ full_name: "", nickname: "", phone: "", email: "" });
 
   const addMutation = useMutation({
     mutationFn: (data: typeof form) => apiRequest("POST", `/api/org/${orgId}/recipients`, data),
@@ -249,6 +301,23 @@ function RecipientsSection({ orgId, recipients, refetch }: {
     },
     onError: (e: any) => toast({ title: "新增失敗", description: e?.message, variant: "destructive" }),
   });
+
+  const editMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: typeof editForm }) =>
+      apiRequest("PATCH", `/api/org/${orgId}/recipients/${id}`, data),
+    onSuccess: () => { toast({ title: "資料已更新" }); setEditTarget(null); refetch(); },
+    onError: (e: any) => toast({ title: "更新失敗", description: e?.message, variant: "destructive" }),
+  });
+
+  const openEdit = (r: CareRecipient) => {
+    setEditTarget(r);
+    setEditForm({
+      full_name: r.person_profiles?.full_name || "",
+      nickname: r.person_profiles?.nickname || "",
+      phone: r.person_profiles?.phone || "",
+      email: r.person_profiles?.email || "",
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -289,18 +358,51 @@ function RecipientsSection({ orgId, recipients, refetch }: {
         </div>
       )}
 
+      {/* Edit Modal */}
+      {editTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6">
+            <h3 className="font-bold text-lg mb-4">編輯被照護者資料</h3>
+            <div className="space-y-3">
+              {[
+                { label: "姓名", key: "full_name" },
+                { label: "暱稱", key: "nickname" },
+                { label: "電話", key: "phone" },
+                { label: "Email", key: "email" },
+              ].map(({ label, key }) => (
+                <div key={key}>
+                  <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                  <input value={(editForm as any)[key]}
+                    onChange={e => setEditForm(p => ({ ...p, [key]: e.target.value }))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#0ABAB5] focus:outline-none" />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => editMutation.mutate({ id: editTarget.id, data: editForm })}
+                disabled={editMutation.isPending}
+                className="flex-1 bg-[#0ABAB5] text-white py-2 rounded-lg text-sm font-medium hover:bg-[#089490] disabled:opacity-50">
+                {editMutation.isPending ? "儲存中..." : "儲存"}
+              </button>
+              <button onClick={() => setEditTarget(null)}
+                className="flex-1 border py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              {["姓名", "暱稱", "電話", "Email", "狀態", "加入日期"].map(h => (
+              {["姓名", "暱稱", "電話", "Email", "狀態", "加入日期", ""].map(h => (
                 <th key={h} className="text-left px-4 py-3 text-xs font-medium text-gray-500">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {recipients.length === 0 ? (
-              <tr><td colSpan={6} className="text-center py-8 text-gray-400">尚無被照護者資料</td></tr>
+              <tr><td colSpan={7} className="text-center py-8 text-gray-400">尚無被照護者資料</td></tr>
             ) : recipients.map(r => (
               <tr key={r.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">
@@ -314,6 +416,10 @@ function RecipientsSection({ orgId, recipients, refetch }: {
                 <td className="px-4 py-3 text-gray-500">{r.person_profiles?.email || "—"}</td>
                 <td className="px-4 py-3"><Badge status={r.status} /></td>
                 <td className="px-4 py-3 text-gray-500">{r.created_at?.slice(0, 10)}</td>
+                <td className="px-4 py-3">
+                  <button onClick={() => openEdit(r)}
+                    className="text-xs text-[#0ABAB5] hover:text-[#089490] font-medium">✏️ 編輯</button>
+                </td>
               </tr>
             ))}
           </tbody>

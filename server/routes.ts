@@ -540,6 +540,57 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json(data);
   });
 
+  // PATCH /api/org/:orgId/recipients/:recipientId — 編輯被照護者資料
+  app.patch("/api/org/:orgId/recipients/:recipientId", requireAuth, async (req, res) => {
+    const { orgId, recipientId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { full_name, nickname, phone, email } = req.body;
+
+    // First find the person_profile_id for this recipient
+    const { data: recipient } = await supabaseAdmin
+      .from("care_recipients")
+      .select("person_profile_id")
+      .eq("id", recipientId)
+      .eq("primary_org_id", orgId)
+      .single();
+    if (!recipient) return res.status(404).json({ message: "找不到被照護者" });
+
+    const updates: any = {};
+    if (full_name !== undefined) updates.full_name = full_name;
+    if (nickname !== undefined) updates.nickname = nickname;
+    if (phone !== undefined) updates.phone = phone;
+    if (email !== undefined) updates.email = email;
+
+    const { error } = await supabaseAdmin
+      .from("person_profiles")
+      .update(updates)
+      .eq("id", recipient.person_profile_id);
+    if (error) return res.status(500).json({ message: error.message });
+    res.json({ ok: true });
+  });
+
+  // PATCH /api/org/:orgId/members/:memberId — 編輯照護員角色/職稱
+  app.patch("/api/org/:orgId/members/:memberId", requireAuth, async (req, res) => {
+    const { orgId, memberId } = req.params;
+    if (!await assertOrgAdmin(req.supabaseUser!.id, orgId)) {
+      return res.status(403).json({ message: "無權限" });
+    }
+    const { role_code, title } = req.body;
+    const updates: any = {};
+    if (role_code) updates.role_code = role_code;
+    if (title !== undefined) updates.title = title;
+
+    const { error } = await supabaseAdmin
+      .from("organization_members")
+      .update(updates)
+      .eq("id", memberId)
+      .eq("organization_id", orgId);
+    if (error) return res.status(500).json({ message: error.message });
+    res.json({ ok: true });
+  });
+
   // GET /api/org/:orgId/subscriptions — 訂閱資訊
   app.get("/api/org/:orgId/subscriptions", requireAuth, async (req, res) => {
     const { orgId } = req.params;
