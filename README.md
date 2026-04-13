@@ -15,19 +15,25 @@ npm run dev
 
 ## 登入帳號
 
-### 員工後台（點「員工登入」）
-| 帳號 | 密碼 | 角色 |
-|------|------|------|
-| admin | admin123 | 超級管理員 |
-| sales_chen | demo123 | 業務 |
-| finance_lin | demo123 | 財務 |
+> ⚠️ 以下帳號為 Supabase Auth 帳號（Email 登入），非舊版帳號密碼
 
-### 客戶入口（點「客戶登入」）
-| 帳號 | 密碼 | 類型 |
-|------|------|------|
-| cirai_org | demo123 | 機構（慈愛養護中心）|
-| taipei_welfare | demo123 | 社會局（台北市）|
-| chen_hua | demo123 | 個人 |
+### 員工後台（Staff / 超級管理員）
+| Email | 密碼 | 角色 | 登入後畫面 |
+|-------|------|------|-----------|
+| admin@twinc.ai | admin2026! | Superadmin | StaffDashboard |
+
+### 機構管理員
+| Email | 密碼 | 角色 | 所屬機構 |
+|-------|------|------|---------|
+| admin@love.com | admin2026! | OrgAdmin | 仁愛長照機構 |
+
+### Care 端帳號（家人 / 長輩 / 照護員）
+| Email | 密碼 | 角色 |
+|-------|------|------|
+| family@huhu.ai | Family2026! | 家人 |
+| elder@huhu.ai | Elder2026! | 長輩 |
+| elder02@huhu.com | Elder2026! | 長輩 |
+| caregiver@huhu.ai | Caregiver2026! | 照護員 |
 
 ---
 
@@ -40,19 +46,26 @@ npm run dev
 - **帳單管理**：新增帳單、查看狀態
 - **金流紀錄**：標記付款、查看付款歷史
 - **服務紀錄**：各客戶月度使用量
-- **員工管理**：員工列表
+- **員工管理**：員工列表（含角色/職稱編輯）
+
+### 機構管理員後台 (`/#/org/dashboard`)
+- **成員管理**：照護員列表（含角色/職稱編輯）
+- **被照護者管理**：長輩資料（含姓名/電話/Email 編輯）
 
 ### 客戶入口 (`/#/portal/overview`)
 - **總覽**：訂閱狀態、待繳通知
 - **帳單查詢**：查看所有帳單、線上付款
 - **我的訂閱**：方案詳情、到期日
-- **方案介紹**：比較各方案
-- **使用紀錄**：月度對話量、警報數
 
 ---
 
 ## 技術架構
 - Frontend: React + Vite + Tailwind CSS + TanStack Query + Wouter
-- Backend: Express.js + express-session
-- 資料庫: In-Memory (Demo用，可接PostgreSQL)
-- 付款整合: 模擬綠界/藍新/Stripe/銀行匯款
+- Backend: Express.js + Supabase Auth
+- 資料庫: Supabase (PostgreSQL)
+- 付款整合: 綠界 / 藍新 / Stripe / 銀行匯款
+
+## Render 部署
+- Service: `huhu-saas`
+- Repo: `victor6699/huhu-saas` (master)
+- Push: `git push origin master`
