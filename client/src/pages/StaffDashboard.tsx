@@ -205,6 +205,8 @@ export default function StaffDashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const [editCrmUser, setEditCrmUser] = useState<CrmUser | null>(null);
+  const [editCrmForm, setEditCrmForm] = useState({ fullName: "", phone: "", role: "" });
 
   // ── Queries ────────────────────────────────────────────────
   const { data: me } = useQuery<Me>({ queryKey: ["/api/me"] });
@@ -310,6 +312,12 @@ export default function StaffDashboard() {
     onError: (error: Error) => {
       toast({ title: "匯入失敗", description: error.message, variant: "destructive" });
     },
+  });
+  const updateCrmMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: typeof editCrmForm }) =>
+      apiRequest("PATCH", `/api/crm/users/${id}`, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/crm/users"] }); setEditCrmUser(null); toast({ title: "使用者資料已更新" }); },
+    onError: (e: any) => toast({ title: "更新失敗", description: e?.message, variant: "destructive" }),
   });
   const logout = async () => { await forceLogout(); };
 
@@ -514,7 +522,7 @@ export default function StaffDashboard() {
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50 border-b">
                         <tr>
-                          {["姓名","Email","電話","類型","來源","機構/組織","照護關係","註冊日期","最後登入"].map(h => (
+                          {["姓名","Email","電話","類型","來源","機構/組織","照護關係","註冊日期","最後登入","操作"].map(h => (
                             <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500">{h}</th>
                           ))}
                         </tr>
@@ -549,13 +557,41 @@ export default function StaffDashboard() {
                             </td>
                             <td className="px-3 py-3 text-xs text-gray-500">{u.createdAt?.slice(0, 10)}</td>
                             <td className="px-3 py-3 text-xs text-gray-500">{u.lastSignInAt ? new Date(u.lastSignInAt).toLocaleDateString("zh-TW") : "從未"}</td>
+                            <td className="px-3 py-3">
+                              <button onClick={() => { setEditCrmUser(u); setEditCrmForm({ fullName: u.fullName || "", phone: u.phone || "", role: u.role || "" }); }}
+                                className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200">✏️ 編輯</button>
+                            </td>
                           </tr>
                         ))}
                         {filtered.length === 0 && (
-                          <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">無符合條件的使用者</td></tr>
+                          <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">無符合條件的使用者</td></tr>
                         )}
                       </tbody>
                     </table>
+                  </div>
+                )}
+
+                {/* CRM Edit Modal */}
+                {editCrmUser && (
+                  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+                      <h2 className="text-lg font-bold mb-1">編輯使用者資料</h2>
+                      <p className="text-xs text-gray-400 mb-4">{editCrmUser.email}</p>
+                      <div className="space-y-3">
+                        <div><label className="block text-xs font-medium text-gray-700 mb-1">姓名</label>
+                          <input value={editCrmForm.fullName} onChange={e => setEditCrmForm(f => ({...f, fullName: e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                        <div><label className="block text-xs font-medium text-gray-700 mb-1">電話</label>
+                          <input value={editCrmForm.phone} onChange={e => setEditCrmForm(f => ({...f, phone: e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                        <div><label className="block text-xs font-medium text-gray-700 mb-1">角色 (role)</label>
+                          <input value={editCrmForm.role} onChange={e => setEditCrmForm(f => ({...f, role: e.target.value}))} placeholder="e.g. user, family, elder" className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                      </div>
+                      <div className="flex gap-2 mt-5">
+                        <button onClick={() => updateCrmMutation.mutate({ id: editCrmUser.id, data: editCrmForm })} disabled={updateCrmMutation.isPending}
+                          className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                          {updateCrmMutation.isPending ? "儲存中..." : "儲存"}</button>
+                        <button onClick={() => setEditCrmUser(null)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                      </div>
+                    </div>
                   </div>
                 )}
 

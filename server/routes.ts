@@ -648,25 +648,61 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     if (!email || !displayName || !role)
       return res.status(400).json({ message: "email、displayName、role 為必填" });
 
-    // Create Supabase Auth user
+    // Try to create a new Supabase Auth user
+    let authUserId: string;
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password: password || Math.random().toString(36).slice(-10) + "A1!",
       email_confirm: true,
       user_metadata: { full_name: displayName, role },
     });
-    if (authError) return res.status(500).json({ message: authError.message });
 
-    // Create person_profile
+    if (authError) {
+      // If user already exists, look them up by email instead
+      if (authError.message.toLowerCase().includes("already been registered") ||
+          authError.message.toLowerCase().includes("already exists")) {
+        const { data: { users }, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+        const existing = users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
+        if (!existing) return res.status(400).json({ message: "找不到此 Email 的現有帳號，請確認 Email 是否正確" });
+        authUserId = existing.id;
+      } else {
+        return res.status(500).json({ message: authError.message });
+      }
+    } else {
+      authUserId = authData.user!.id;
+    }
+
+    // Upsert person_profile (create if not exists)
     const { data: profile, error: profileError } = await supabaseAdmin
       .from("person_profiles")
-      .insert({ user_id: authData.user!.id, full_name: displayName, email })
+      .upsert({ user_id: authUserId, full_name: displayName, email }, { onConflict: "user_id" })
       .select("id")
       .single();
     if (profileError) return res.status(500).json({ message: profileError.message });
 
-    res.json({ user: authData.user, profile });
+    // Look up HuHu org (where staff live — first org or org named HuHu)
+    const { data: huhuOrg } = await supabaseAdmin
+      .from("organizations")
+      .select("id")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .single();
+
+    // Upsert the organization_member entry
+    if (huhuOrg) {
+      await supabaseAdmin
+        .from("organization_members")
+        .upsert({
+          user_id: authUserId,
+          organization_id: huhuOrg.id,
+          role_code: role,
+          status: "active",
+        }, { onConflict: "user_id,organization_id" });
+    }
+
+    res.json({ userId: authUserId, profile, linked: !authData });
   });
+
 
   // ── Update Staff Member (role / title) ─────────────────────
   app.patch("/api/staff/members/:id", requireAuth, async (req, res) => {
