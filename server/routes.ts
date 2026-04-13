@@ -668,6 +668,23 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json({ user: authData.user, profile });
   });
 
+  // ── Update Staff Member (role / title) ─────────────────────
+  app.patch("/api/staff/members/:id", requireAuth, async (req, res) => {
+    const { id } = req.params;
+    const { role_code, title } = req.body;
+    const update: Record<string, any> = {};
+    if (role_code) update.role_code = role_code;
+    if (title !== undefined) update.title = title;
+    const { data, error } = await supabaseAdmin
+      .from("organization_members")
+      .update(update)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
+  });
+
   // ── Debug / Health Check ────────────────────────────────────
   app.get("/api/debug/health", async (req, res) => {
     const envOk = !!process.env.SUPABASE_URL && !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY);

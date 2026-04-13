@@ -191,6 +191,11 @@ export default function StaffDashboard() {
   const [newSubForm, setNewSubForm] = useState({ organizationId: "", planId: "", billingCycle: "monthly", elderCount: "1", amount: "", startDate: "", endDate: "" });
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [newStaffForm, setNewStaffForm] = useState(INITIAL_STAFF_FORM);
+  // ── Edit state ──────────────────────────────────────────────
+  const [editOrgTarget, setEditOrgTarget] = useState<Organization | null>(null);
+  const [editOrgForm, setEditOrgForm] = useState({ name: "", email: "", phone: "", address: "", tax_id: "" });
+  const [editStaffTarget, setEditStaffTarget] = useState<StaffMember | null>(null);
+  const [editStaffForm, setEditStaffForm] = useState({ role_code: "sales", title: "" });
   // CRM state
   const [userTypeFilter, setUserTypeFilter] = useState<string>("all");
   const [userSearch, setUserSearch] = useState("");
@@ -282,6 +287,18 @@ export default function StaffDashboard() {
     onError: (error: Error) => {
       toast({ title: "新增失敗", description: error.message, variant: "destructive" });
     },
+  });
+  const updateOrgMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: typeof editOrgForm }) =>
+      apiRequest("PATCH", `/api/organizations/${id}`, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/organizations"] }); setEditOrgTarget(null); toast({ title: "機構資料已更新" }); },
+    onError: (e: any) => toast({ title: "更新失敗", description: e?.message, variant: "destructive" }),
+  });
+  const updateStaffMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: typeof editStaffForm }) =>
+      apiRequest("PATCH", `/api/staff/members/${id}`, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/staff/members"] }); setEditStaffTarget(null); toast({ title: "員工資料已更新" }); },
+    onError: (e: any) => toast({ title: "更新失敗", description: e?.message, variant: "destructive" }),
   });
   const batchImportMutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", "/api/crm/batch-import", body),
@@ -680,7 +697,9 @@ export default function StaffDashboard() {
                         <td className="px-4 py-3 text-gray-600">{c.phone}</td>
                         <td className="px-4 py-3"><Badge status={c.status} /></td>
                         <td className="px-4 py-3 text-gray-500">{c.created_at?.slice(0,10)}</td>
-                        <td className="px-4 py-3 flex gap-1">
+                        <td className="px-4 py-3 flex gap-1 flex-wrap">
+                          <button onClick={() => { setEditOrgTarget(c); setEditOrgForm({ name: c.name, email: c.email ?? "", phone: c.phone ?? "", address: c.address ?? "", tax_id: c.tax_id ?? "" }); }}
+                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200">✏️ 編輯</button>
                           {c.status === "pending" && (
                             <button onClick={() => activateMutation.mutate(c.id)} className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs hover:bg-green-200">✓ 開通</button>
                           )}
@@ -696,6 +715,35 @@ export default function StaffDashboard() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Edit Org Modal */}
+              {editOrgTarget && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-2xl w-full max-w-md p-6">
+                    <h2 className="text-lg font-bold mb-4">編輯機構資料</h2>
+                    <div className="space-y-3">
+                      <div><label className="block text-xs font-medium text-gray-700 mb-1">機構名稱</label>
+                        <input value={editOrgForm.name} onChange={e => setEditOrgForm(f => ({...f, name: e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                      <div><label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
+                        <input value={editOrgForm.email} onChange={e => setEditOrgForm(f => ({...f, email: e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div><label className="block text-xs font-medium text-gray-700 mb-1">電話</label>
+                          <input value={editOrgForm.phone} onChange={e => setEditOrgForm(f => ({...f, phone: e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                        <div><label className="block text-xs font-medium text-gray-700 mb-1">統編</label>
+                          <input value={editOrgForm.tax_id} onChange={e => setEditOrgForm(f => ({...f, tax_id: e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                      </div>
+                      <div><label className="block text-xs font-medium text-gray-700 mb-1">地址</label>
+                        <input value={editOrgForm.address} onChange={e => setEditOrgForm(f => ({...f, address: e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                    </div>
+                    <div className="flex gap-2 mt-5">
+                      <button onClick={() => updateOrgMutation.mutate({ id: editOrgTarget.id, data: editOrgForm })} disabled={updateOrgMutation.isPending}
+                        className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                        {updateOrgMutation.isPending ? "儲存中..." : "儲存"}</button>
+                      <button onClick={() => setEditOrgTarget(null)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* New Org Modal */}
               {showClientModal && (
@@ -1075,7 +1123,7 @@ export default function StaffDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
                     <tr>
-                      {["姓名","Email","角色","狀態"].map(h=>(
+                      {["姓名","Email","角色","狀態","操作"].map(h=>(
                         <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
                       ))}
                     </tr>
@@ -1087,11 +1135,42 @@ export default function StaffDashboard() {
                         <td className="px-4 py-3 text-gray-600">{s.person_profiles?.email ?? "-"}</td>
                         <td className="px-4 py-3 text-gray-600">{s.role_code === "superadmin" ? "超級管理員" : s.role_code === "sales" ? "業務" : s.role_code === "finance" ? "財務" : "客服"}</td>
                         <td className="px-4 py-3"><Badge status="active"/></td>
+                        <td className="px-4 py-3">
+                          <button onClick={() => { setEditStaffTarget(s); setEditStaffForm({ role_code: s.role_code, title: s.title ?? "" }); }}
+                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200">✏️ 編輯</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+
+              {/* Edit Staff Modal */}
+              {editStaffTarget && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+                    <h2 className="text-lg font-bold mb-4">編輯員工資料</h2>
+                    <p className="text-sm text-gray-500 mb-3">{editStaffTarget.person_profiles?.full_name} ({editStaffTarget.person_profiles?.email})</p>
+                    <div className="space-y-3">
+                      <div><label className="block text-xs font-medium text-gray-700 mb-1">角色</label>
+                        <select value={editStaffForm.role_code} onChange={e => setEditStaffForm(f => ({...f, role_code: e.target.value}))} className="w-full border rounded px-2 py-1.5 text-sm">
+                          <option value="superadmin">超級管理員</option>
+                          <option value="sales">業務</option>
+                          <option value="finance">財務</option>
+                          <option value="support">客服</option>
+                        </select></div>
+                      <div><label className="block text-xs font-medium text-gray-700 mb-1">職稱（選填）</label>
+                        <input value={editStaffForm.title} onChange={e => setEditStaffForm(f => ({...f, title: e.target.value}))} placeholder="例：資深業務主任" className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                    </div>
+                    <div className="flex gap-2 mt-5">
+                      <button onClick={() => updateStaffMutation.mutate({ id: editStaffTarget.id, data: editStaffForm })} disabled={updateStaffMutation.isPending}
+                        className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                        {updateStaffMutation.isPending ? "儲存中..." : "儲存"}</button>
+                      <button onClick={() => setEditStaffTarget(null)} className="flex-1 border py-2 rounded-lg text-sm">取消</button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* New Staff Modal */}
               {showStaffModal && (
