@@ -20,18 +20,19 @@ export function useAuth() {
 
   // Fetch extended user profile — prefer server /api/me (bypasses RLS),
   // fall back to direct Supabase client queries.
-  const fetchUserProfile = useCallback(async (supabaseUser: SupabaseUser): Promise<AuthUser> => {
+  // ⚠️ accessToken must be passed in — do NOT call supabase.auth.getSession()
+  // inside onAuthStateChange as it causes a PKCE deadlock on Safari/iOS.
+  const fetchUserProfile = useCallback(async (supabaseUser: SupabaseUser, accessToken?: string): Promise<AuthUser> => {
     // ── Strategy 1: server-side /api/me (uses service_role, no RLS issues) ──
     try {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      if (s?.access_token) {
+      if (accessToken) {
         // Add 5-second timeout to prevent hanging on slow connections (iPad)
         const controller = new AbortController();
         const timeoutHandle = setTimeout(() => controller.abort(), 5000);
         const res = await fetch("/api/me", {
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${s.access_token}`,
+            "Authorization": `Bearer ${accessToken}`,
           },
           credentials: "include",
           signal: controller.signal,
@@ -125,7 +126,8 @@ export function useAuth() {
         setSession(s);
         if (s?.user) {
           try {
-            const profile = await fetchUserProfile(s.user);
+            // Pass access_token directly — avoids re-calling getSession() in PKCE flow
+            const profile = await fetchUserProfile(s.user, s.access_token);
             setUser(profile);
           } catch {
             // Fallback: basic user info from session
@@ -148,12 +150,15 @@ export function useAuth() {
     initAuth();
 
     // Listen for auth state changes
+    // ⚠️ Do NOT call supabase.auth.getSession() inside this callback —
+    // doing so deadlocks on PKCE flow in Safari/iOS (ITP blocks sessionStorage access).
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
         setSession(newSession);
         if (newSession?.user) {
           try {
-            const profile = await fetchUserProfile(newSession.user);
+            // Pass access_token directly — critical for PKCE on Safari
+            const profile = await fetchUserProfile(newSession.user, newSession.access_token ?? undefined);
             setUser(profile);
           } catch {
             setUser({
