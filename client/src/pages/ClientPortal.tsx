@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, forceLogout } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { HealthDashboardModal } from "../components/HealthDashboardModal";
 
 type Client = { id: number; clientType: string; orgName: string | null; contactName: string; contactEmail: string; status: string };
 type Plan = { id: number; name: string; description: string; monthlyPrice: number; annualPrice: number; maxElders: number; features: string };
@@ -34,6 +35,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
   }, [props.params?.rest]);
   const [payModal, setPayModal] = useState<Invoice | null>(null);
   const [contactModal, setContactModal] = useState<any | null>(null);
+  const [healthModal, setHealthModal] = useState<any | null>(null);
   const [payMethod, setPayMethod] = useState("ecpay");
   const [payLoading, setPayLoading] = useState(false);
 
@@ -249,9 +251,9 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 pt-4 border-t border-gray-100">
-                           <a href="https://huhu-care-os.onrender.com/#/" className="text-center py-2 text-sm text-[#0ABAB5] border border-[#0ABAB5] rounded-lg hover:bg-[#F0FEFE] font-medium transition-colors">
-                             開啟健康儀表板
-                           </a>
+                           <button onClick={() => setHealthModal(member)} className="text-center py-2 text-sm text-[#0ABAB5] border border-[#0ABAB5] rounded-lg hover:bg-[#F0FEFE] font-medium transition-colors">
+                             健康追蹤儀表板
+                           </button>
                            <a href={`https://huhu-care-os.onrender.com/chat?id=${member.id}`} className="text-center py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-black font-medium transition-colors">
                              開始對話
                            </a>
@@ -505,6 +507,15 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
             </div>
           </div>
         </div>
+      )}
+      
+      {/* 🌿 健康趨勢儀表板 Modal */}
+      {healthModal && (
+        <HealthDashboardModal 
+          recipientId={healthModal.id} 
+          name={healthModal.person_profiles?.full_name || '長輩'} 
+          onClose={() => setHealthModal(null)} 
+        />
       )}
     </div>
   );

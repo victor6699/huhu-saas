@@ -2,6 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { z } from "zod";
 import { extractUser, requireAuth, requireStaff, supabaseAdmin } from "./auth-middleware";
+import { pool } from "./db";
 
 // ═══════════════════════════════════════════════════════════════
 // Validation Schemas
@@ -392,6 +393,27 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     } catch (err) {
       console.error("[portal/family] error:", err);
       res.json([]);
+    }
+  });
+
+  app.get("/api/portal/health/:recipientId", requireAuth, async (req, res) => {
+    try {
+      const { recipientId } = req.params;
+      
+      const { rows: metrics } = await pool.query(
+        'SELECT * FROM weekly_metrics WHERE user_id = $1 ORDER BY week_start ASC LIMIT 12',
+        [recipientId]
+      );
+
+      const { rows: phq2 } = await pool.query(
+        'SELECT * FROM phq2_screenings WHERE user_id = $1 ORDER BY screening_date ASC LIMIT 12',
+        [recipientId]
+      );
+
+      res.json({ weeklyMetrics: metrics, phq2Screenings: phq2 });
+    } catch (err) {
+      console.error("[portal/health] error:", err);
+      res.status(500).json({ message: "無法取得健康數據" });
     }
   });
 
