@@ -4,3 +4,12 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Ad-hoc 診斷腳本含 hardcoded service_role key 與明文密碼，永遠不可 commit
+fix-*.cjs
+check-*.cjs
+diagnose-*.cjs
+test-*.cjs
+add-*.cjs
+verify-*.cjs
+keep-only-two.cjs
