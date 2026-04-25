@@ -3,7 +3,10 @@ import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, forceLogout } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { HealthDashboardModal } from "../components/HealthDashboardModal";
+
+const CARE_URL = "https://huhu-care-os.onrender.com";
 
 type Client = { id: number; clientType: string; orgName: string | null; contactName: string; contactEmail: string; status: string };
 type Plan = { id: number; name: string; description: string; monthlyPrice: number; annualPrice: number; maxElders: number; features: string };
@@ -25,6 +28,7 @@ function Badge({ status }: { status: string }) {
 export default function ClientPortal(props: { params?: { rest?: string } }) {
   const [, nav] = useLocation();
   const { toast } = useToast();
+  const { session } = useAuth();
   const initialSection = (props.params?.rest as any) || "overview";
   const [section, setSection] = useState<"overview"|"invoices"|"subscriptions"|"plans"|"service"|"family">(initialSection);
 
@@ -50,6 +54,18 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
     await forceLogout();
   };
 
+  // Navigate to HUHU LIFE+ with SSO tokens so user doesn't need to re-login
+  const navigateToCare = (path = "") => {
+    let url = `${CARE_URL}${path}`;
+    if (session?.access_token) {
+      const params = new URLSearchParams();
+      params.set("t", session.access_token);
+      if (session.refresh_token) params.set("r", session.refresh_token);
+      url += `?${params.toString()}`;
+    }
+    window.location.href = url;
+  };
+
   const fmt = (n: number) => n.toLocaleString("zh-TW");
 
   async function handlePay() {
@@ -71,12 +87,12 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
   const activeSub = subscriptions.find(s => s.status === "active");
 
   const navItems = [
-    { key: "overview",       label: "總覽",     icon: "🏠" },
-    { key: "family",         label: "家人管理", icon: "👥" },
-    { key: "invoices",       label: "發票管理", icon: "📄", badge: unpaidCount > 0 ? unpaidCount : undefined },
-    { key: "subscriptions",  label: "訂閱",     icon: "📋" },
-    { key: "plans",          label: "方案選購", icon: "💡" },
-    { key: "service",        label: "服務記錄", icon: "📊" },
+    { key: "overview",       label: "總覽",     icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> },
+    { key: "family",         label: "家人管理", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+    { key: "invoices",       label: "發票管理", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>, badge: unpaidCount > 0 ? unpaidCount : undefined },
+    { key: "subscriptions",  label: "訂閱",     icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg> },
+    { key: "plans",          label: "方案選購", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg> },
+    { key: "service",        label: "服務記錄", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> },
   ] as const;
 
   const clientLabel = me ? (me.orgName || me.contactName) : "載入中...";
@@ -92,7 +108,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
               (e.target as HTMLImageElement).style.display = "none";
             }} />
             <div>
-              <p className="text-sm font-bold text-white">HuHu AI</p>
+              <p className="text-sm font-bold text-white">HuHu saas</p>
               <p className="text-xs text-[#7DDDD9]">客戶後台</p>
             </div>
           </div>
@@ -103,7 +119,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
               className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between transition-colors ${
                 section === item.key ? "bg-[#0ABAB5] text-white" : "text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white"
               }`}>
-              <span className="flex items-center gap-2"><span>{item.icon}</span>{item.label}</span>
+              <span className="flex items-center gap-2">{item.icon}{item.label}</span>
               {(item as any).badge && <span className="bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">{(item as any).badge}</span>}
             </button>
           ))}
@@ -111,8 +127,14 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
         <div className="p-3 border-t border-[#0ABAB5]/30">
           <div className="text-xs text-[#7DDDD9] mb-2 px-1 truncate">{clientLabel}</div>
           {me && <div className="text-xs text-[#A0E7E4] mb-2 px-1">{typeZH[me.clientType] ?? me.clientType} · <Badge status={me.status} /></div>}
-          <a href="https://huhu-care-os.onrender.com" className="block w-full text-left px-3 py-2 rounded-lg text-sm text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white transition-colors mb-1">🏠 回到 HuHu Care</a>
-          <button onClick={logout} className="w-full text-left px-3 py-2 rounded-lg text-sm text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white transition-colors">🚪 登出</button>
+          <button onClick={() => navigateToCare()} className="flex items-center gap-2 w-full text-left px-3 py-2 rounded-lg text-sm text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white transition-colors mb-1">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            回到 HUHU LIFE+
+          </button>
+          <button onClick={logout} className="flex items-center gap-2 w-full text-left px-3 py-2 rounded-lg text-sm text-[#A0E7E4] hover:bg-[#0ABAB5]/20 hover:text-white transition-colors">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            登出
+          </button>
         </div>
       </aside>
 
@@ -201,9 +223,9 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
             <div>
               <div className="flex items-center justify-between mb-6">
                 <h1 className="text-xl font-bold text-gray-900">家人帳號管理</h1>
-                <a href="https://huhu-care-os.onrender.com/onboarding" className="px-4 py-2 bg-[#0ABAB5] text-white rounded-lg hover:bg-[#089490] text-sm font-medium flex items-center gap-2 transition-colors">
+                <button onClick={() => navigateToCare("/onboarding")} className="px-4 py-2 bg-[#0ABAB5] text-white rounded-lg hover:bg-[#089490] text-sm font-medium flex items-center gap-2 transition-colors">
                   <span>➕</span> <span className="hidden sm:inline">新增家人</span>
-                </a>
+                </button>
               </div>
 
               {family.length === 0 ? (
@@ -211,9 +233,9 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
                    <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center text-3xl mb-4">👥</div>
                    <h3 className="text-lg font-bold text-gray-800 mb-1">尚無家屬資料</h3>
                    <p className="text-gray-500 text-sm mb-6 max-w-sm">您尚未加入任何家人至您的帳號群組中。點擊下方按鈕開始為長輩建立專屬健康助理。</p>
-                   <a href="https://huhu-care-os.onrender.com/onboarding" className="px-6 py-2.5 bg-[#0ABAB5] text-white rounded-lg font-medium hover:bg-[#089490] transition-colors shadow-sm">
+                   <button onClick={() => navigateToCare("/onboarding")} className="px-6 py-2.5 bg-[#0ABAB5] text-white rounded-lg font-medium hover:bg-[#089490] transition-colors shadow-sm">
                      新增家人帳號
-                   </a>
+                   </button>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -254,9 +276,9 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
                            <button onClick={() => setHealthModal(member)} className="text-center py-2 text-sm text-[#0ABAB5] border border-[#0ABAB5] rounded-lg hover:bg-[#F0FEFE] font-medium transition-colors">
                              健康追蹤儀表板
                            </button>
-                           <a href={`https://huhu-care-os.onrender.com/chat?id=${member.id}`} className="text-center py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-black font-medium transition-colors">
+                           <button onClick={() => navigateToCare(`/chat?id=${member.id}`)} className="text-center py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-black font-medium transition-colors">
                              開始對話
-                           </a>
+                           </button>
                         </div>
                       </div>
                     );

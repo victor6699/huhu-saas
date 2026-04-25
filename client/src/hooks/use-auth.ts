@@ -209,6 +209,17 @@ export function useAuth() {
     if (error) throw error;
   };
 
+  const signInWithProvider = async (provider: "google") => {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}`,
+      },
+    });
+    if (error) throw error;
+    return data;
+  };
+
   return {
     session,
     user,
@@ -217,6 +228,7 @@ export function useAuth() {
     signUp,
     signOut,
     resetPassword,
+    signInWithProvider,
     isAuthenticated: !!session,
   };
 }

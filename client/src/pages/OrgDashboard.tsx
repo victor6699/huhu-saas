@@ -541,11 +541,11 @@ export default function OrgDashboard() {
   const activeSub = subscriptions.find(s => s.status === "active" || s.status === "trial");
 
   const navItems = [
-    { key: "overview", label: "總覽", icon: "🏠" },
-    { key: "members", label: "照護員", icon: "👩‍⚕️" },
-    { key: "recipients", label: "被照護者", icon: "🧓" },
-    { key: "billing", label: "帳單", icon: "📄", badge: invoices.filter(i => i.status === "unpaid" || i.status === "overdue").length || undefined },
-    { key: "settings", label: "機構設定", icon: "⚙️" },
+    { key: "overview", label: "總覽", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> },
+    { key: "members", label: "照護員", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
+    { key: "recipients", label: "被照護者", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> },
+    { key: "billing", label: "帳單", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>, badge: invoices.filter(i => i.status === "unpaid" || i.status === "overdue").length || undefined },
+    { key: "settings", label: "機構設定", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
   ] as const;
 
   if (!orgId) {
@@ -569,7 +569,7 @@ export default function OrgDashboard() {
             <img src="/huhu-logo.png" alt="HuHu" className="w-8 h-8 object-contain rounded-lg"
               onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
             <div>
-              <p className="text-sm font-bold text-white">HuHu AI</p>
+              <p className="text-sm font-bold text-white">HuHu saas</p>
               <p className="text-xs text-[#7DDDD9]">機構管理後台</p>
             </div>
           </div>
@@ -588,10 +588,10 @@ export default function OrgDashboard() {
                   ? "bg-[#0ABAB5] text-white"
                   : "text-[#7DDDD9] hover:bg-white/10"
               }`}>
-              <span>{item.icon}</span>
+              {item.icon}
               <span className="flex-1">{item.label}</span>
-              {item.badge ? (
-                <span className="bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{item.badge}</span>
+              {(item as any).badge ? (
+                <span className="bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{(item as any).badge}</span>
               ) : null}
             </button>
           ))}
@@ -599,7 +599,8 @@ export default function OrgDashboard() {
 
         <div className="p-3 border-t border-[#0ABAB5]/20">
           <button onClick={forceLogout}
-            className="w-full text-left text-xs text-[#7DDDD9]/70 hover:text-white px-3 py-2 rounded-lg hover:bg-white/10 transition-colors">
+            className="w-full flex items-center gap-2 text-left text-xs text-[#7DDDD9]/70 hover:text-white px-3 py-2 rounded-lg hover:bg-white/10 transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             登出
           </button>
         </div>

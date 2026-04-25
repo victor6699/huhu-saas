@@ -4,26 +4,43 @@
 
 @layer base {
   :root {
-    --background: 180 30% 98%;
-    --foreground: 200 20% 12%;
-    --card: 0 0% 100%;
-    --card-foreground: 200 20% 12%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 200 20% 12%;
+    /* ── Aligned with HuHu Care: Warm Wellness + Tiffany Blue ── */
+    --background: 30 20% 97%;
+    --foreground: 20 15% 18%;
+
+    --card: 30 18% 98%;
+    --card-foreground: 20 15% 18%;
+
+    --popover: 30 18% 98%;
+    --popover-foreground: 20 15% 18%;
+
+    /* Primary: HuHu Tiffany Blue (#0ABAB5) */
     --primary: 178 90% 38%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 178 30% 92%;
-    --secondary-foreground: 178 40% 20%;
-    --muted: 178 20% 94%;
-    --muted-foreground: 178 10% 50%;
-    --accent: 178 30% 90%;
-    --accent-foreground: 178 40% 20%;
-    --destructive: 0 84% 55%;
+
+    /* Secondary: soft Tiffany tint */
+    --secondary: 178 45% 95%;
+    --secondary-foreground: 178 60% 20%;
+
+    --muted: 178 15% 93%;
+    --muted-foreground: 178 8% 48%;
+
+    --accent: 178 55% 92%;
+    --accent-foreground: 178 80% 25%;
+
+    /* Risk colors */
+    --destructive: 0 72% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 178 20% 88%;
-    --input: 178 20% 88%;
+
+    --border: 30 12% 88%;
+    --input: 30 12% 88%;
     --ring: 178 90% 38%;
-    --radius: 0.5rem;
+
+    --radius: 0.75rem;
+
+    --font-body: 'Noto Sans TC', 'DM Sans', system-ui, sans-serif;
+
+    /* SaaS-specific: Sidebar tokens */
     --sidebar-background: 178 40% 18%;
     --sidebar-foreground: 178 30% 90%;
     --sidebar-accent: 178 40% 24%;
@@ -32,6 +49,8 @@
     --sidebar-primary: 178 90% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-ring: 178 90% 50%;
+
+    /* Chart colors */
     --chart-1: 178 90% 38%;
     --chart-2: 160 55% 40%;
     --chart-3: 38 92% 50%;
@@ -39,25 +58,34 @@
     --chart-5: 0 84% 55%;
   }
   .dark {
-    --background: 178 30% 8%;
-    --foreground: 178 20% 92%;
-    --card: 178 30% 12%;
-    --card-foreground: 178 20% 92%;
-    --popover: 178 30% 12%;
-    --popover-foreground: 178 20% 92%;
-    --primary: 178 90% 50%;
-    --primary-foreground: 178 40% 8%;
-    --secondary: 178 25% 20%;
-    --secondary-foreground: 178 20% 85%;
-    --muted: 178 25% 18%;
-    --muted-foreground: 178 15% 55%;
-    --accent: 178 25% 22%;
-    --accent-foreground: 178 20% 90%;
-    --destructive: 0 84% 55%;
+    --background: 200 15% 9%;
+    --foreground: 30 10% 88%;
+
+    --card: 200 14% 12%;
+    --card-foreground: 30 10% 88%;
+
+    --popover: 200 14% 12%;
+    --popover-foreground: 30 10% 88%;
+
+    --primary: 178 75% 52%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 200 12% 18%;
+    --secondary-foreground: 30 8% 75%;
+
+    --muted: 200 12% 16%;
+    --muted-foreground: 200 8% 50%;
+
+    --accent: 178 40% 20%;
+    --accent-foreground: 178 60% 75%;
+
+    --destructive: 0 65% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 178 25% 22%;
-    --input: 178 25% 22%;
-    --ring: 178 90% 50%;
+
+    --border: 200 10% 20%;
+    --input: 200 10% 20%;
+    --ring: 212 70% 60%;
+
     --sidebar-background: 178 40% 6%;
     --sidebar-foreground: 178 20% 80%;
     --sidebar-accent: 178 40% 12%;
@@ -67,6 +95,41 @@
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-ring: 178 90% 55%;
   }
-  * { @apply border-border; }
-  body { @apply bg-background text-foreground font-sans; }
 }
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1, h2, h3, h4, h5, h6 { text-wrap: balance; }
+  p, li { text-wrap: pretty; }
+}
+
+/* ── Shared animations (aligned with HuHu Care) ── */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
+
+/* Skeleton loader */
+.skeleton {
+  background: linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--accent)) 50%, hsl(var(--muted)) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 0.5rem;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
