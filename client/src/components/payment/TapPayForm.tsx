@@ -9,12 +9,12 @@ interface TapPayFormProps {
 const APP_ID   = parseInt(import.meta.env.VITE_TAPPAY_APP_ID   || "168511", 10);
 const APP_KEY  = import.meta.env.VITE_TAPPAY_APP_KEY            || "app_8SzB1FIS9nBRfGnveqGRYLrcq1lE8CwcUD5qlQPeq7EuCkzyHAbp16mTxXwt";
 const ENV_MODE = (import.meta.env.VITE_TAPPAY_ENV               || "sandbox") as "sandbox" | "production";
-// Try multiple SDK URLs in order until one loads
+// v5.14.0+ uses /sdk/ prefix; older versions use /tpdirect/ directly
 const SDK_URLS = [
-  "https://js.tappaysdk.com/tpdirect/v5.17.0",
-  "https://js.tappaysdk.com/tpdirect/v5.16.0",
-  "https://js.tappaysdk.com/tpdirect/v5.15.0",
-  "https://js.tappaysdk.com/tpdirect/v5.14.0",
+  "https://js.tappaysdk.com/sdk/tpdirect/v5.17.0",
+  "https://js.tappaysdk.com/sdk/tpdirect/v5.16.0",
+  "https://js.tappaysdk.com/sdk/tpdirect/v5.15.0",
+  "https://js.tappaysdk.com/sdk/tpdirect/v5.14.0",
 ];
 const TIMEOUT_MS = 8000;
 
