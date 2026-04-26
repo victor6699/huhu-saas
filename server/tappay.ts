@@ -67,7 +67,11 @@ tappayRouter.post("/pay-by-prime", requireAuth, async (req, res) => {
         details: "HuHu SaaS 系統訂閱",
         amount: amount,
         currency: "TWD",
-        cardholder: cardholder,
+        cardholder: {
+          phone_number: cardholder.phoneNumber,  // TapPay requires snake_case
+          name: cardholder.name,
+          email: cardholder.email,
+        },
         remember: true // 要求記住卡片，TapPay 會回傳 token
       }),
     });
