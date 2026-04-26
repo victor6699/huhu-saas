@@ -143,9 +143,18 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
       setSubscribeModal(null);
       setSection("subscriptions");
     } catch (e: any) {
-      const msg = await e?.response?.json().catch(() => ({ message: "刷卡失敗" }));
-      const detail = msg?.tappay_msg || msg?.detail || msg?.message || "請確認信用卡資訊是否正確";
-      const statusCode = msg?.tappay_status != null ? `（TapPay Status: ${msg.tappay_status}）` : "";
+      let detail = "請確認信用卡資訊是否正確";
+      let statusCode = "";
+      try {
+        // apiRequest throws Error with message "400: {json body}"
+        const errText = e?.message || "";
+        const jsonStart = errText.indexOf("{");
+        if (jsonStart >= 0) {
+          const parsed = JSON.parse(errText.slice(jsonStart));
+          detail = parsed.tappay_msg || parsed.detail || parsed.message || detail;
+          if (parsed.tappay_status != null) statusCode = `（TapPay code: ${parsed.tappay_status}）`;
+        }
+      } catch { /* keep default */ }
       toast({ title: "訂閱失敗", description: `${detail}${statusCode}`, variant: "destructive" });
     } finally {
       setPayLoading(false);
