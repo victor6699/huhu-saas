@@ -194,7 +194,17 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
     const { data, error } = await supabaseAdmin
       .from("subscriptions")
-      .insert(parsed.data)
+      .insert({
+        organization_id: parsed.data.organizationId,
+        plan_id: parsed.data.planId,
+        billing_cycle: parsed.data.billingCycle,
+        status: parsed.data.status,
+        elder_count: parsed.data.elderCount,
+        start_date: parsed.data.startDate,
+        end_date: parsed.data.endDate,
+        next_billing_date: parsed.data.nextBillingDate,
+        amount: parsed.data.amount,
+      })
       .select()
       .single();
 
