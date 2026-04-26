@@ -346,6 +346,13 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
     const enriched = (subs || []).map(s => ({
       ...s,
+      planId: s.plan_id,
+      organizationId: s.organization_id,
+      billingCycle: s.billing_cycle,
+      elderCount: s.elder_count,
+      startDate: s.start_date,
+      endDate: s.end_date,
+      nextBillingDate: s.next_billing_date,
       plans: planMap[s.plan_id] || null
     }));
 
@@ -370,7 +377,18 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
       .order("issue_date", { ascending: false });
 
     if (error) return res.status(500).json({ message: error.message });
-    res.json(data);
+    
+    const mapped = (data || []).map(inv => ({
+      ...inv,
+      organizationId: inv.organization_id,
+      invoiceNo: inv.invoice_no,
+      issueDate: inv.issue_date,
+      dueDate: inv.due_date,
+      periodStart: inv.period_start,
+      periodEnd: inv.period_end
+    }));
+    
+    res.json(mapped);
   });
 
   app.get("/api/portal/service-records", requireAuth, async (req, res) => {
