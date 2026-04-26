@@ -144,7 +144,9 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
       setSection("subscriptions");
     } catch (e: any) {
       const msg = await e?.response?.json().catch(() => ({ message: "刷卡失敗" }));
-      toast({ title: "訂閱失敗", description: msg?.message || msg?.detail || "請確認信用卡資訊是否正確", variant: "destructive" });
+      const detail = msg?.tappay_msg || msg?.detail || msg?.message || "請確認信用卡資訊是否正確";
+      const statusCode = msg?.tappay_status != null ? `（TapPay Status: ${msg.tappay_status}）` : "";
+      toast({ title: "訂閱失敗", description: `${detail}${statusCode}`, variant: "destructive" });
     } finally {
       setPayLoading(false);
     }
