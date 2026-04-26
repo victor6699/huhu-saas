@@ -464,6 +464,9 @@ export const subscriptions = pgTable("subscriptions", {
   endDate: date("end_date").notNull(),
   nextBillingDate: date("next_billing_date").notNull(),
   amount: real("amount").notNull(),
+  tappayCardToken: text("tappay_card_token"),
+  tappayCardKey: text("tappay_card_key"),
+  tappayCardInfo: jsonb("tappay_card_info"), // Store masked card number, expiry, etc.
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

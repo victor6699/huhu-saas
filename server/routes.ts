@@ -66,9 +66,14 @@ const parsePayload = <T>(schema: z.ZodType<T>, payload: unknown) => {
 // Routes
 // ═══════════════════════════════════════════════════════════════
 
+import { tappayRouter } from "./tappay";
+
 export async function registerRoutes(_httpServer: Server, app: Express) {
   // Apply Supabase auth middleware globally
   app.use(extractUser);
+
+  // Mount TapPay routes
+  app.use("/api/tappay", tappayRouter);
 
   // ── Auth ────────────────────────────────────────────────────
   app.get("/api/me", requireAuth, async (req, res) => {

@@ -5,14 +5,15 @@ import { apiRequest, queryClient, forceLogout } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { HealthDashboardModal } from "../components/HealthDashboardModal";
+import { TapPayForm } from "../components/payment/TapPayForm";
 
 const CARE_URL = "https://huhu-care-os.onrender.com";
 
-type Client = { id: number; clientType: string; orgName: string | null; contactName: string; contactEmail: string; status: string };
-type Plan = { id: number; name: string; description: string; monthlyPrice: number; annualPrice: number; maxElders: number; features: string };
-type Subscription = { id: number; planId: number; billingCycle: string; status: string; elderCount: number; startDate: string; endDate: string; nextBillingDate: string; amount: number };
-type Invoice = { id: number; invoiceNo: string; issueDate: string; dueDate: string; periodStart: string; periodEnd: string; subtotal: number; tax: number; total: number; status: string; notes: string | null };
-type ServiceRecord = { id: number; month: string; elderCount: number; conversationCount: number; alertCount: number; activeElders: number };
+type Client = { id: number; orgId: string; clientType: string; orgName: string | null; contactName: string; contactEmail: string; status: string };
+type Plan = { id: string; name: string; description: string; monthlyPrice: number; annualPrice: number; maxElders: number; features: string };
+type Subscription = { id: string; planId: string; billingCycle: string; status: string; elderCount: number; startDate: string; endDate: string; nextBillingDate: string; amount: number };
+type Invoice = { id: string; invoiceNo: string; issueDate: string; dueDate: string; periodStart: string; periodEnd: string; subtotal: number; tax: number; total: number; status: string; notes: string | null };
+type ServiceRecord = { id: string; month: string; elderCount: number; conversationCount: number; alertCount: number; activeElders: number };
 
 const STATUS_BADGE: Record<string, string> = {
   active: "bg-green-100 text-green-800", pending: "bg-yellow-100 text-yellow-800",
@@ -38,6 +39,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
     }
   }, [props.params?.rest]);
   const [payModal, setPayModal] = useState<Invoice | null>(null);
+  const [subscribeModal, setSubscribeModal] = useState<{ plan: Plan; cycle: "monthly" | "annual" } | null>(null);
   const [contactModal, setContactModal] = useState<any | null>(null);
   const [healthModal, setHealthModal] = useState<any | null>(null);
   const [payMethod, setPayMethod] = useState("ecpay");
@@ -81,6 +83,39 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
       toast({ title: "付款失敗", description: msg?.message, variant: "destructive" });
     } finally { setPayLoading(false); }
   }
+
+  const handleSubscribe = async (prime: string) => {
+    if (!subscribeModal || !me) return;
+    setPayLoading(true);
+    try {
+      const orgId = (me as any).memberships?.[0]?.organization_id;
+      if (!orgId) throw new Error("找不到您的組織，請聯絡客服。");
+
+      const amount = subscribeModal.cycle === "annual" ? subscribeModal.plan.annualPrice * 12 : subscribeModal.plan.monthlyPrice;
+
+      await apiRequest("POST", "/api/tappay/pay-by-prime", {
+        prime,
+        organizationId: orgId,
+        planId: subscribeModal.plan.id,
+        amount,
+        cardholder: {
+          phoneNumber: "0900000000", // placeholder
+          name: me.contactName || "User",
+          email: me.contactEmail || "user@example.com",
+        }
+      });
+      
+      toast({ title: "訂閱成功", description: "已成功綁定信用卡並完成扣款！" });
+      queryClient.invalidateQueries({ queryKey: ["/api/portal/subscriptions"] });
+      setSubscribeModal(null);
+      setSection("subscriptions");
+    } catch (e: any) {
+      const msg = await e?.response?.json().catch(() => ({ message: "刷卡失敗" }));
+      toast({ title: "訂閱失敗", description: msg?.message || msg?.detail || "請確認信用卡資訊是否正確", variant: "destructive" });
+    } finally {
+      setPayLoading(false);
+    }
+  };
 
   const unpaidCount = invoices.filter(i => i.status === "unpaid" || i.status === "overdue").length;
   const unpaidAmt = invoices.filter(i => i.status === "unpaid" || i.status === "overdue").reduce((s, i) => s + i.total, 0);
@@ -400,13 +435,24 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
                           <p className="font-bold text-gray-900">{plan.maxElders === 999 ? "無限制" : `${plan.maxElders} 人`}</p>
                         </div>
                       </div>
-                      <div className="space-y-1">
+                      <div className="space-y-1 mb-5">
                         {features.map((f, i) => (
                           <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
                             <span className="text-green-500">✓</span>{f}
                           </div>
                         ))}
                       </div>
+                      
+                      {!isActive && (
+                        <div className="flex gap-2 mt-auto pt-4 border-t border-black/5">
+                          <button onClick={() => setSubscribeModal({ plan, cycle: "monthly" })} className="flex-1 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm">
+                            月繳訂閱
+                          </button>
+                          <button onClick={() => setSubscribeModal({ plan, cycle: "annual" })} className={`flex-1 py-2 text-white rounded-lg text-sm font-medium transition-colors shadow-sm ${idx % 4 === 0 ? "bg-[#0ABAB5] hover:bg-[#089490]" : idx % 4 === 1 ? "bg-[#089490] hover:bg-[#067A77]" : "bg-indigo-600 hover:bg-indigo-700"}`}>
+                            年繳訂閱
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -538,6 +584,51 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
           name={healthModal.person_profiles?.full_name || '長輩'} 
           onClose={() => setHealthModal(null)} 
         />
+      )}
+
+      {/* Subscribe Modal (TapPay) */}
+      {subscribeModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h2 className="text-xl font-bold mb-1">訂閱方案</h2>
+            <p className="text-sm text-gray-500 mb-5">請輸入信用卡資訊完成定期定額綁定</p>
+            
+            <div className="bg-gray-50 rounded-xl p-4 mb-5 border border-gray-100">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-gray-600 font-medium">{subscribeModal.plan.name}</span>
+                <Badge status="active" />
+              </div>
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-gray-500">計費週期</span>
+                <span>{subscribeModal.cycle === "annual" ? "年繳" : "月繳"}</span>
+              </div>
+              <div className="flex justify-between text-sm mb-3 pb-3 border-b border-gray-200">
+                <span className="text-gray-500">首期扣款金額</span>
+                <span className="font-bold text-[#0ABAB5]">
+                  NT$ {fmt(subscribeModal.cycle === "annual" ? subscribeModal.plan.annualPrice * 12 : subscribeModal.plan.monthlyPrice)}
+                </span>
+              </div>
+              <div className="text-xs text-gray-500 flex items-start gap-1.5">
+                <span className="text-[#0ABAB5] mt-0.5">ℹ️</span>
+                <span>綁定成功後，系統將於每個週期自動進行扣款。您隨時可於後台取消訂閱。</span>
+              </div>
+            </div>
+
+            <TapPayForm 
+              loading={payLoading} 
+              onSubmit={handleSubscribe} 
+              buttonText={`確認付款 NT$ ${fmt(subscribeModal.cycle === "annual" ? subscribeModal.plan.annualPrice * 12 : subscribeModal.plan.monthlyPrice)}`} 
+            />
+
+            <button 
+              onClick={() => setSubscribeModal(null)} 
+              disabled={payLoading}
+              className="mt-3 w-full border border-gray-200 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              取消返回
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

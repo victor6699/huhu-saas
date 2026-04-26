@@ -59,8 +59,11 @@ app.use((req, res, next) => {
   next();
 });
 
+import { startCronJobs } from "./cron";
+
 (async () => {
   await registerRoutes(httpServer, app);
+  startCronJobs();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
