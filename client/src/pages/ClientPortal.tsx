@@ -49,7 +49,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
   const { data: subscriptions = [] } = useQuery<Subscription[]>({ queryKey: ["/api/portal/subscriptions"] });
   const { data: invoices = [] } = useQuery<Invoice[]>({ queryKey: ["/api/portal/invoices"] });
   const { data: serviceRecords = [] } = useQuery<ServiceRecord[]>({ queryKey: ["/api/portal/service-records"] });
-  const { data: plans = [] } = useQuery<Plan[]>({ queryKey: ["/api/plans"] });
+  const { data: plans = [] } = useQuery<any[]>({ queryKey: ["/api/plans", "v2"] });
   const { data: family = [] } = useQuery<any[]>({ queryKey: ["/api/portal/family"] });
 
   const logout = async () => {
@@ -368,7 +368,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
               {subscriptions.length === 0 ? (
                 <div className="bg-white rounded-xl border p-12 text-center">
                   <p className="text-gray-400 mb-4">尚無訂閱方案</p>
-                  <button onClick={() => setSection("plans")} className="px-4 py-2 bg-[#0ABAB5] text-white rounded-lg text-sm">查看方案</button>
+                  <button onClick={() => { setSection("plans"); nav("/portal/plans"); }} className="px-4 py-2 bg-[#0ABAB5] text-white rounded-lg text-sm">查看方案</button>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -424,15 +424,15 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
                       <div className="flex gap-4 mb-3">
                         <div>
                           <p className="text-xs text-gray-400">月繳</p>
-                          <p className="font-bold text-gray-900">NT$ {fmt(plan.monthlyPrice)}</p>
+                          <p className="font-bold text-gray-900">NT$ {fmt(plan.monthlyPrice ?? plan.monthly_price)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-400">年繳（×12個月）</p>
-                          <p className="font-bold text-gray-900">NT$ {fmt(plan.annualPrice)}</p>
+                          <p className="font-bold text-gray-900">NT$ {fmt(plan.annualPrice ?? plan.annual_price)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-400">最多長輩數</p>
-                          <p className="font-bold text-gray-900">{plan.maxElders === 999 ? "無限制" : `${plan.maxElders} 人`}</p>
+                          <p className="font-bold text-gray-900">{(plan.maxElders ?? plan.max_elders) === 999 ? "無限制" : `${plan.maxElders ?? plan.max_elders} 人`}</p>
                         </div>
                       </div>
                       <div className="space-y-1 mb-5">
