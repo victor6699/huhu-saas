@@ -5,9 +5,11 @@ import { eq } from "drizzle-orm";
 
 export const tappayRouter = Router();
 
-const TAPPAY_API_URL = process.env.NODE_ENV === "production" 
-  ? "https://prod.tappaysdk.com/tpc/payment/pay-by-prime"
-  : "https://sandbox.tappaysdk.com/tpc/payment/pay-by-prime";
+// Use TAPPAY_ENV to control sandbox/prod (NODE_ENV="production" on Render but we may still want sandbox)
+const isSandbox = (process.env.TAPPAY_ENV ?? "sandbox") !== "production";
+const TAPPAY_API_URL = isSandbox
+  ? "https://sandbox.tappaysdk.com/tpc/payment/pay-by-prime"
+  : "https://prod.tappaysdk.com/tpc/payment/pay-by-prime";
 
 const payByPrimeSchema = z.object({
   prime: z.string().min(1),
@@ -62,11 +64,14 @@ tappayRouter.post("/pay-by-prime", requireAuth, async (req, res) => {
     const tappayData = await response.json() as any;
 
     // 3. 判斷付款結果
+    console.log("[TapPay] API URL:", TAPPAY_API_URL, "status:", tappayData.status, "msg:", tappayData.msg);
     if (tappayData.status !== 0) {
-      console.error("TapPay Payment Failed:", tappayData);
+      console.error("TapPay Payment Failed:", JSON.stringify(tappayData));
       return res.status(400).json({ 
         message: "付款失敗", 
-        detail: tappayData.msg 
+        detail: tappayData.msg,
+        tappay_status: tappayData.status,
+        tappay_msg: tappayData.msg,
       });
     }
 
