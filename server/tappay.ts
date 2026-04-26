@@ -91,8 +91,9 @@ tappayRouter.post("/pay-by-prime", requireAuth, async (req, res) => {
     }
 
     // 4. 付款成功，儲存卡片資訊與建立訂閱紀錄
-    const cardSecret = tappayData.card_secret; // 後續用來做定扣的 key
-    const cardToken = tappayData.card_info.card_token; // 實際的 token
+    // card_secret contains card_token and card_key for recurring charges
+    const cardToken = tappayData.card_secret?.card_token ?? null;
+    const cardKey   = tappayData.card_secret?.card_key   ?? null;
     
     // 計算訂閱週期
     const startDate = new Date();
@@ -116,15 +117,16 @@ tappayRouter.post("/pay-by-prime", requireAuth, async (req, res) => {
         end_date: nextBillingDate.toISOString().split('T')[0],
         next_billing_date: nextBillingDate.toISOString().split('T')[0],
         tappay_card_token: cardToken,
-        tappay_card_key: cardSecret,
-        tappay_card_info: tappayData.card_info, // 裡面包含卡號後四碼等資訊
+        tappay_card_key: cardKey,
+        tappay_card_info: tappayData.card_info ?? null,
       })
       .select()
       .single();
 
     if (error) {
-      console.error("Save subscription error:", error);
-      return res.status(500).json({ message: "付款成功，但儲存訂閱資料失敗" });
+      console.error("Save subscription error:", JSON.stringify(error));
+      // Return Supabase error detail so we can diagnose column issues
+      return res.status(500).json({ message: "付款成功，但儲存訂閱資料失敗", db_error: error.message, db_code: error.code });
     }
 
     res.json({ ok: true, subscription });
