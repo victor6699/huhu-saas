@@ -104,12 +104,12 @@ export function TapPayForm({ onSubmit, loading, buttonText = "確認付款" }: T
               ccv:            { element: "#card-ccv",             placeholder: "CVV" },
             },
             styles: {
-              "input":    { color: "#374151", "font-family": "sans-serif", "font-size": "14px" },
+              "input":    { color: "#374151", "font-family": "sans-serif", "font-size": "14px", "padding": "0 12px" },
               ".valid":   { color: "#059669" },
               ".invalid": { color: "#DC2626" },
             },
             isMaskCreditCardNumber: true,
-            maskCreditCardNumberRange: { beginIndex: 6, cursorIndex: 1 },
+            maskCreditCardNumberRange: { beginIndex: 6, endIndex: 11 },
           });
         } catch (e: any) {
           throw new Error("card.setup 失敗: " + (e?.message || String(e)));
@@ -177,21 +177,22 @@ export function TapPayForm({ onSubmit, loading, buttonText = "確認付款" }: T
         <div style={{ display: status === "error" ? "none" : "block" }}>
           <div className="mb-3">
             <label className="block text-xs font-semibold text-gray-700 mb-1.5">信用卡卡號</label>
+            {/* ⚠️ TapPay iframe container — NO flex/padding/items-center */}
             <div id="card-number"
-              className="h-10 border border-gray-300 rounded-lg px-3 flex items-center bg-gray-50 focus-within:ring-2 focus-within:ring-[#0ABAB5] transition-all"
+              style={{ height: 40, border: "1px solid #D1D5DB", borderRadius: 8, background: "#F9FAFB", overflow: "hidden" }}
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">有效期限</label>
               <div id="card-expiration-date"
-                className="h-10 border border-gray-300 rounded-lg px-3 flex items-center bg-gray-50 focus-within:ring-2 focus-within:ring-[#0ABAB5] transition-all"
+                style={{ height: 40, border: "1px solid #D1D5DB", borderRadius: 8, background: "#F9FAFB", overflow: "hidden" }}
               />
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">背面安全碼</label>
               <div id="card-ccv"
-                className="h-10 border border-gray-300 rounded-lg px-3 flex items-center bg-gray-50 focus-within:ring-2 focus-within:ring-[#0ABAB5] transition-all"
+                style={{ height: 40, border: "1px solid #D1D5DB", borderRadius: 8, background: "#F9FAFB", overflow: "hidden" }}
               />
             </div>
           </div>
