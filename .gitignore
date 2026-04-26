@@ -13,3 +13,16 @@ test-*.cjs
 add-*.cjs
 verify-*.cjs
 keep-only-two.cjs
+
+# Ad-hoc 診斷腳本含 hardcoded key（key 已輪替廢，但仍不該入 history）
+fix-*.cjs
+check-*.cjs
+diagnose-*.cjs
+test-*.cjs
+add-*.cjs
+verify-*.cjs
+keep-only-two.cjs
+scripts/check-*.mjs
+scripts/reset-*.mjs
+scripts/add-*.ts
+scripts/check-*.ts
