@@ -9,7 +9,13 @@ interface TapPayFormProps {
 const APP_ID   = parseInt(import.meta.env.VITE_TAPPAY_APP_ID   || "168511", 10);
 const APP_KEY  = import.meta.env.VITE_TAPPAY_APP_KEY            || "app_8SzB1FIS9nBRfGnveqGRYLrcq1lE8CwcUD5qlQPeq7EuCkzyHAbp16mTxXwt";
 const ENV_MODE = (import.meta.env.VITE_TAPPAY_ENV               || "sandbox") as "sandbox" | "production";
-const SDK_URL  = "https://js.tappaysdk.com/tpdirect/v5.14.0";
+// Try multiple SDK URLs in order until one loads
+const SDK_URLS = [
+  "https://js.tappaysdk.com/tpdirect/v5.17.0",
+  "https://js.tappaysdk.com/tpdirect/v5.16.0",
+  "https://js.tappaysdk.com/tpdirect/v5.15.0",
+  "https://js.tappaysdk.com/tpdirect/v5.14.0",
+];
 const TIMEOUT_MS = 8000;
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
@@ -19,24 +25,48 @@ function injectSDK(): Promise<void> {
   return new Promise((resolve, reject) => {
     if ((window as any).TPDirect) { resolve(); return; }
 
-    const existing = document.getElementById("tappay-sdk-script") as HTMLScriptElement | null;
-    if (existing) {
-      // Already injecting — wait for it
-      const poll = setInterval(() => {
-        if ((window as any).TPDirect) { clearInterval(poll); resolve(); }
-      }, 100);
-      setTimeout(() => { clearInterval(poll); reject(new Error("SDK timeout")); }, TIMEOUT_MS);
-      return;
-    }
+    let urlIndex = 0;
 
-    const timer = setTimeout(() => reject(new Error("SDK 載入超時，請確認網路連線是否正常")), TIMEOUT_MS);
+    const tryNext = () => {
+      if (urlIndex >= SDK_URLS.length) {
+        reject(new Error(`TapPay SDK 所有版本均無法載入（已嘗試 ${SDK_URLS.length} 個 URL）`));
+        return;
+      }
 
-    const s = document.createElement("script");
-    s.id  = "tappay-sdk-script";
-    s.src = SDK_URL;
-    s.onload  = () => { clearTimeout(timer); resolve(); };
-    s.onerror = () => { clearTimeout(timer); reject(new Error(`TapPay SDK 無法載入（${SDK_URL}）`)); };
-    document.head.appendChild(s);
+      const url = SDK_URLS[urlIndex++];
+      console.log("[TapPay] Trying SDK URL:", url);
+
+      // Remove previous failed script if any
+      const old = document.getElementById("tappay-sdk-script");
+      if (old) old.remove();
+
+      const timer = setTimeout(() => {
+        console.warn("[TapPay] Timeout for:", url);
+        tryNext();
+      }, TIMEOUT_MS);
+
+      const s = document.createElement("script");
+      s.id  = "tappay-sdk-script";
+      s.src = url;
+      s.onload = () => {
+        clearTimeout(timer);
+        if ((window as any).TPDirect) {
+          console.log("[TapPay] SDK loaded from:", url);
+          resolve();
+        } else {
+          console.warn("[TapPay] TPDirect not found after load:", url);
+          tryNext();
+        }
+      };
+      s.onerror = () => {
+        clearTimeout(timer);
+        console.warn("[TapPay] Failed to load:", url);
+        tryNext();
+      };
+      document.head.appendChild(s);
+    };
+
+    tryNext();
   });
 }
 
