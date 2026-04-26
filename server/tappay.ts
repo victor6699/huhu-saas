@@ -11,6 +11,17 @@ const TAPPAY_API_URL = isSandbox
   ? "https://sandbox.tappaysdk.com/tpc/payment/pay-by-prime"
   : "https://prod.tappaysdk.com/tpc/payment/pay-by-prime";
 
+// Diagnostic: check outbound IP of this server (needed for TapPay IP whitelist)
+tappayRouter.get("/server-ip", async (_req, res) => {
+  try {
+    const r = await fetch("https://api.ipify.org?format=json");
+    const data = await r.json() as { ip: string };
+    res.json({ outbound_ip: data.ip, tappay_env: process.env.TAPPAY_ENV ?? "sandbox(default)", tappay_api: TAPPAY_API_URL });
+  } catch (e: any) {
+    res.json({ error: e.message });
+  }
+});
+
 const payByPrimeSchema = z.object({
   prime: z.string().min(1),
   organizationId: z.string().uuid(),
