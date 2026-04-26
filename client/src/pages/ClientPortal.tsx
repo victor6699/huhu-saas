@@ -39,11 +39,31 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
     }
   }, [props.params?.rest]);
   const [payModal, setPayModal] = useState<Invoice | null>(null);
-  const [subscribeModal, setSubscribeModal] = useState<{ plan: Plan; cycle: "monthly" | "annual" } | null>(null);
+  const [subscribeModal, setSubscribeModal] = useState<{ plan: any; cycle: "monthly" | "annual"; elderCount: number } | null>(null);
+  const [elderCount, setElderCount] = useState(1);
   const [contactModal, setContactModal] = useState<any | null>(null);
   const [healthModal, setHealthModal] = useState<any | null>(null);
   const [payMethod, setPayMethod] = useState("ecpay");
   const [payLoading, setPayLoading] = useState(false);
+
+  // 動態計算長輩人數費用：每多1位長輩 8折（複利）
+  const calcPrice = (basePricePerElder: number, count: number): number => {
+    let total = 0;
+    for (let i = 0; i < count; i++) {
+      total += basePricePerElder * Math.pow(0.8, i);
+    }
+    return Math.round(total);
+  };
+
+  const calcPriceBreakdown = (basePricePerElder: number, count: number) => {
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      const price = Math.round(basePricePerElder * Math.pow(0.8, i));
+      const disc = i === 0 ? "原價" : `${Math.round((1 - Math.pow(0.8, i)) * 100)}% off`;
+      rows.push({ elder: i + 1, price, disc });
+    }
+    return rows;
+  };
 
   const { data: me } = useQuery<Client>({ queryKey: ["/api/me"] });
   const { data: subscriptions = [] } = useQuery<Subscription[]>({ queryKey: ["/api/portal/subscriptions"] });
@@ -100,14 +120,16 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
       }
       if (!orgId) throw new Error("無法建立組織，請聯絡客服。");
 
-      const amount = subscribeModal.cycle === "annual" ? subscribeModal.plan.annualPrice * 12 : subscribeModal.plan.monthlyPrice;
+      const amount = subscribeModal.cycle === "annual"
+        ? calcPrice(subscribeModal.plan.annualPrice ?? subscribeModal.plan.annual_price ?? 2988, subscribeModal.elderCount)
+        : calcPrice(subscribeModal.plan.monthlyPrice ?? subscribeModal.plan.monthly_price ?? 288, subscribeModal.elderCount);
 
       await apiRequest("POST", "/api/tappay/pay-by-prime", {
         prime,
         organizationId: orgId,
         planId: subscribeModal.plan.id,
         cycle: subscribeModal.cycle,
-        elderCount: subscribeModal.plan.maxElders ?? subscribeModal.plan.max_elders ?? 1,
+        elderCount: subscribeModal.elderCount,
         amount,
         cardholder: {
           phoneNumber: "0900000000", // placeholder
@@ -416,58 +438,100 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
             </div>
           )}
 
-          {/* 方案選購 */}
           {section === "plans" && (
             <div>
-              <h1 className="text-xl font-bold text-gray-900 mb-2">可選方案</h1>
-              <p className="text-sm text-gray-500 mb-6">如需升級或客製化請聯繫 sales@huhu.ai</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {plans.map((plan, idx) => {
-                  const features: string[] = JSON.parse(plan.features);
-                  const isActive = subscriptions.some(s => s.planId === plan.id && s.status === "active");
-                  const colors = ["border-[#A0E7E4] bg-[#E0F8F7]", "border-[#7DDDD9] bg-[#F0FEFE]", "border-indigo-200 bg-indigo-50", "border-purple-200 bg-purple-50"];
-                  const textColors = ["text-[#0ABAB5]", "text-[#089490]", "text-indigo-700", "text-purple-700"];
-                  return (
-                    <div key={plan.id} className={`rounded-xl border-2 ${colors[idx % 4]} p-5 relative`}>
-                      {isActive && <span className="absolute top-3 right-3 bg-green-500 text-white text-xs px-2 py-0.5 rounded-full font-medium">目前使用中</span>}
-                      <p className={`text-lg font-bold ${textColors[idx % 4]}`}>{plan.name}</p>
-                      <p className="text-sm text-gray-600 mt-1 mb-3">{plan.description}</p>
-                      <div className="flex gap-4 mb-3">
-                        <div>
-                          <p className="text-xs text-gray-400">月繳</p>
-                          <p className="font-bold text-gray-900">NT$ {fmt(plan.monthlyPrice ?? plan.monthly_price)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-400">年繳（×12個月）</p>
-                          <p className="font-bold text-gray-900">NT$ {fmt(plan.annualPrice ?? plan.annual_price)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-400">最多長輩數</p>
-                          <p className="font-bold text-gray-900">{(plan.maxElders ?? plan.max_elders) === 999 ? "無限制" : `${plan.maxElders ?? plan.max_elders} 人`}</p>
-                        </div>
+              <h1 className="text-xl font-bold text-gray-900 mb-1">可選方案</h1>
+              <p className="text-sm text-gray-500 mb-6">依照顧長輩人數彈性計費，每多1位長輩享8折優惠</p>
+
+              {plans.length === 0 ? (
+                <div className="bg-white rounded-xl border p-12 text-center text-gray-400">載入方案中...</div>
+              ) : plans.map((plan) => {
+                const features: string[] = (() => { try { return JSON.parse(plan.features); } catch { return []; } })();
+                const baseMonthly = plan.monthlyPrice ?? plan.monthly_price ?? 288;
+                const baseAnnual = plan.annualPrice ?? plan.annual_price ?? 2988;
+                const totalMonthly = calcPrice(baseMonthly, elderCount);
+                const totalAnnual = calcPrice(baseAnnual, elderCount);
+                const breakdown = calcPriceBreakdown(baseMonthly, elderCount);
+                const isActive = subscriptions.some(s => s.planId === plan.id && s.status === "active");
+
+                return (
+                  <div key={plan.id} className="bg-white rounded-2xl border-2 border-[#A0E7E4] p-6 mb-4">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <p className="text-xl font-bold text-[#0ABAB5]">{plan.name}</p>
+                        <p className="text-sm text-gray-500 mt-1">{plan.description}</p>
                       </div>
-                      <div className="space-y-1 mb-5">
-                        {features.map((f, i) => (
-                          <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
-                            <span className="text-green-500">✓</span>{f}
+                      {isActive && <span className="bg-green-500 text-white text-xs px-3 py-1 rounded-full font-medium">使用中</span>}
+                    </div>
+
+                    {/* 長輩人數選擇器 */}
+                    <div className="bg-[#E0F8F7] rounded-xl p-4 mb-4">
+                      <p className="text-sm font-semibold text-[#0ABAB5] mb-3">選擇照顧長輩人數</p>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setElderCount(c => Math.max(1, c - 1))}
+                          className="w-9 h-9 rounded-full bg-white border-2 border-[#0ABAB5] text-[#0ABAB5] font-bold text-lg flex items-center justify-center hover:bg-[#0ABAB5] hover:text-white transition-colors"
+                        >－</button>
+                        <span className="text-2xl font-bold text-gray-900 w-8 text-center">{elderCount}</span>
+                        <button
+                          onClick={() => setElderCount(c => Math.min(10, c + 1))}
+                          className="w-9 h-9 rounded-full bg-white border-2 border-[#0ABAB5] text-[#0ABAB5] font-bold text-lg flex items-center justify-center hover:bg-[#0ABAB5] hover:text-white transition-colors"
+                        >＋</button>
+                        <span className="text-sm text-gray-500 ml-1">位長輩</span>
+                      </div>
+
+                      {/* 費用明細 */}
+                      <div className="mt-3 space-y-1">
+                        {breakdown.map(row => (
+                          <div key={row.elder} className="flex justify-between text-xs text-gray-600">
+                            <span>第 {row.elder} 位長輩 <span className="text-[#0ABAB5] font-medium">{row.disc}</span></span>
+                            <span>NT$ {fmt(row.price)} / 月</span>
                           </div>
                         ))}
-                      </div>
-                      
-                      {!isActive && (
-                        <div className="flex gap-2 mt-auto pt-4 border-t border-black/5">
-                          <button onClick={() => setSubscribeModal({ plan, cycle: "monthly" })} className="flex-1 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm">
-                            月繳訂閱
-                          </button>
-                          <button onClick={() => setSubscribeModal({ plan, cycle: "annual" })} className={`flex-1 py-2 text-white rounded-lg text-sm font-medium transition-colors shadow-sm ${idx % 4 === 0 ? "bg-[#0ABAB5] hover:bg-[#089490]" : idx % 4 === 1 ? "bg-[#089490] hover:bg-[#067A77]" : "bg-indigo-600 hover:bg-indigo-700"}`}>
-                            年繳訂閱
-                          </button>
+                        <div className="border-t border-[#0ABAB5]/30 pt-2 mt-2 flex justify-between font-bold text-gray-800">
+                          <span>月繳合計</span>
+                          <span className="text-[#0ABAB5] text-lg">NT$ {fmt(totalMonthly)}</span>
                         </div>
-                      )}
+                        <div className="flex justify-between text-sm text-gray-600">
+                          <span>年繳合計 <span className="text-green-600 text-xs">（月均 NT$ {fmt(Math.round(totalAnnual / 12))}，省更多）</span></span>
+                          <span className="font-semibold">NT$ {fmt(totalAnnual)}</span>
+                        </div>
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
+
+                    {/* 功能列表 */}
+                    <div className="grid grid-cols-2 gap-1.5 mb-5">
+                      {features.map((f, i) => (
+                        <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <span className="text-[#0ABAB5]">✓</span>{f}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* 訂閱按鈕 */}
+                    {!isActive ? (
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setSubscribeModal({ plan, cycle: "monthly", elderCount })}
+                          className="flex-1 py-3 bg-white border-2 border-[#0ABAB5] text-[#0ABAB5] rounded-xl text-sm font-bold hover:bg-[#E0F8F7] transition-colors"
+                        >
+                          月繳 NT$ {fmt(totalMonthly)}
+                        </button>
+                        <button
+                          onClick={() => setSubscribeModal({ plan, cycle: "annual", elderCount })}
+                          className="flex-1 py-3 bg-[#0ABAB5] text-white rounded-xl text-sm font-bold hover:bg-[#089490] transition-colors shadow-md"
+                        >
+                          年繳 NT$ {fmt(totalAnnual)} 🎉
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-center py-3 bg-green-50 rounded-xl border border-green-200">
+                        <p className="text-green-700 font-medium text-sm">✅ 方案使用中，如需調整請聯繫 sales@huhu.ai</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -597,30 +661,47 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
         />
       )}
 
-      {/* Subscribe Modal (TapPay) */}
       {subscribeModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h2 className="text-xl font-bold mb-1">訂閱方案</h2>
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-1">確認訂閱</h2>
             <p className="text-sm text-gray-500 mb-5">請輸入信用卡資訊完成定期定額綁定</p>
             
             <div className="bg-gray-50 rounded-xl p-4 mb-5 border border-gray-100">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-600 font-medium">{subscribeModal.plan.name}</span>
-                <Badge status="active" />
+              <div className="flex justify-between items-center mb-3">
+                <span className="font-semibold text-gray-800">{subscribeModal.plan.name}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-[#E0F8F7] text-[#0ABAB5] font-medium">{subscribeModal.cycle === "annual" ? "年繳" : "月繳"}</span>
               </div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-500">計費週期</span>
-                <span>{subscribeModal.cycle === "annual" ? "年繳" : "月繳"}</span>
+
+              {/* 費用明細 */}
+              <div className="space-y-1 mb-3">
+                {calcPriceBreakdown(
+                  subscribeModal.cycle === "annual"
+                    ? (subscribeModal.plan.annualPrice ?? subscribeModal.plan.annual_price ?? 2988)
+                    : (subscribeModal.plan.monthlyPrice ?? subscribeModal.plan.monthly_price ?? 288),
+                  subscribeModal.elderCount
+                ).map(row => (
+                  <div key={row.elder} className="flex justify-between text-xs text-gray-500">
+                    <span>第 {row.elder} 位長輩 <span className="text-[#0ABAB5]">{row.disc}</span></span>
+                    <span>NT$ {fmt(row.price)}</span>
+                  </div>
+                ))}
               </div>
-              <div className="flex justify-between text-sm mb-3 pb-3 border-b border-gray-200">
-                <span className="text-gray-500">首期扣款金額</span>
-                <span className="font-bold text-[#0ABAB5]">
-                  NT$ {fmt(subscribeModal.cycle === "annual" ? subscribeModal.plan.annualPrice * 12 : subscribeModal.plan.monthlyPrice)}
+
+              <div className="border-t border-gray-200 pt-3 flex justify-between items-center">
+                <span className="text-sm text-gray-500">首期扣款金額</span>
+                <span className="text-xl font-bold text-[#0ABAB5]">
+                  NT$ {fmt(calcPrice(
+                    subscribeModal.cycle === "annual"
+                      ? (subscribeModal.plan.annualPrice ?? subscribeModal.plan.annual_price ?? 2988)
+                      : (subscribeModal.plan.monthlyPrice ?? subscribeModal.plan.monthly_price ?? 288),
+                    subscribeModal.elderCount
+                  ))}
                 </span>
               </div>
-              <div className="text-xs text-gray-500 flex items-start gap-1.5">
-                <span className="text-[#0ABAB5] mt-0.5">ℹ️</span>
+              
+              <div className="mt-3 text-xs text-gray-400 flex items-start gap-1.5">
+                <span className="text-[#0ABAB5]">ℹ️</span>
                 <span>綁定成功後，系統將於每個週期自動進行扣款。您隨時可於後台取消訂閱。</span>
               </div>
             </div>
@@ -628,7 +709,12 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
             <TapPayForm 
               loading={payLoading} 
               onSubmit={handleSubscribe} 
-              buttonText={`確認付款 NT$ ${fmt(subscribeModal.cycle === "annual" ? subscribeModal.plan.annualPrice * 12 : subscribeModal.plan.monthlyPrice)}`} 
+              buttonText={`確認付款 NT$ ${fmt(calcPrice(
+                subscribeModal.cycle === "annual"
+                  ? (subscribeModal.plan.annualPrice ?? subscribeModal.plan.annual_price ?? 2988)
+                  : (subscribeModal.plan.monthlyPrice ?? subscribeModal.plan.monthly_price ?? 288),
+                subscribeModal.elderCount
+              ))}`} 
             />
 
             <button 
