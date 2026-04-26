@@ -49,7 +49,7 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
   const { data: subscriptions = [] } = useQuery<Subscription[]>({ queryKey: ["/api/portal/subscriptions"] });
   const { data: invoices = [] } = useQuery<Invoice[]>({ queryKey: ["/api/portal/invoices"] });
   const { data: serviceRecords = [] } = useQuery<ServiceRecord[]>({ queryKey: ["/api/portal/service-records"] });
-  const { data: plans = [] } = useQuery<any[]>({ queryKey: ["/api/plans", "v2"] });
+  const { data: plans = [] } = useQuery<any[]>({ queryKey: ["/api/plans"] });
   const { data: family = [] } = useQuery<any[]>({ queryKey: ["/api/portal/family"] });
 
   const logout = async () => {

@@ -180,7 +180,15 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
       .order("monthly_price");
 
     if (error) return res.status(500).json({ message: error.message });
-    res.json(data);
+    
+    const mapped = (data || []).map(p => ({
+      ...p,
+      monthlyPrice: p.monthly_price,
+      annualPrice: p.annual_price,
+      maxElders: p.max_elders,
+    }));
+    
+    res.json(mapped);
   });
 
   // ── Subscriptions ──────────────────────────────────────────
