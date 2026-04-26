@@ -1,11 +1,15 @@
 import cron from "node-cron";
 import { supabaseAdmin } from "./auth-middleware";
 
-const TAPPAY_TOKEN_API_URL = "https://sandbox.tappaysdk.com/tpc/payment/pay-by-token";
+// Respect TAPPAY_ENV: default sandbox unless explicitly set to production
+const isSandbox = (process.env.TAPPAY_ENV ?? "sandbox") !== "production";
+const TAPPAY_TOKEN_API_URL = isSandbox
+  ? "https://sandbox.tappaysdk.com/tpc/payment/pay-by-token"
+  : "https://prod.tappaysdk.com/tpc/payment/pay-by-token";
 
 export function startCronJobs() {
-  // 每天早上 10 點執行
-  cron.schedule("0 10 * * *", async () => {
+  // 每天 UTC 02:00 = 台灣時間 10:00 AM
+  cron.schedule("0 2 * * *", async () => {
     console.log("[Cron] Running daily TapPay recurring billing job...");
 
     try {
