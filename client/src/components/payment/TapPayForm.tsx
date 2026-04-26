@@ -26,7 +26,7 @@ export function TapPayForm({ onSubmit, loading, buttonText = "確認付款" }: T
       TPD.setupSDK(
         parseInt(import.meta.env.VITE_TAPPAY_APP_ID || "168511", 10), 
         import.meta.env.VITE_TAPPAY_APP_KEY || "", 
-        "sandbox" // Change to "production" when going live
+        import.meta.env.VITE_TAPPAY_ENV || "sandbox"
       );
       setSdkLoaded(true);
 

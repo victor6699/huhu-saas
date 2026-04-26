@@ -88,8 +88,17 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
     if (!subscribeModal || !me) return;
     setPayLoading(true);
     try {
-      const orgId = (me as any).memberships?.[0]?.organization_id;
-      if (!orgId) throw new Error("找不到您的組織，請聯絡客服。");
+      let orgId = (me as any).memberships?.[0]?.organization_id;
+      if (!orgId) {
+        // 自動建立家庭組織
+        const newOrg = await apiRequest("POST", "/api/organizations", {
+          name: me.contactName ? `${me.contactName} 的家庭` : "我的家庭",
+          orgType: "individual_family"
+        });
+        orgId = newOrg.id;
+        queryClient.invalidateQueries({ queryKey: ["/api/me"] });
+      }
+      if (!orgId) throw new Error("無法建立組織，請聯絡客服。");
 
       const amount = subscribeModal.cycle === "annual" ? subscribeModal.plan.annualPrice * 12 : subscribeModal.plan.monthlyPrice;
 
@@ -97,6 +106,8 @@ export default function ClientPortal(props: { params?: { rest?: string } }) {
         prime,
         organizationId: orgId,
         planId: subscribeModal.plan.id,
+        cycle: subscribeModal.cycle,
+        elderCount: subscribeModal.plan.maxElders ?? subscribeModal.plan.max_elders ?? 1,
         amount,
         cardholder: {
           phoneNumber: "0900000000", // placeholder

@@ -138,7 +138,13 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
     const { data, error } = await supabaseAdmin
       .from("organizations")
-      .insert(parsed.data)
+      .insert({
+        org_type: parsed.data.orgType,
+        name: parsed.data.name,
+        legal_name: parsed.data.legalName,
+        tax_id: parsed.data.taxId,
+        address: parsed.data.address
+      })
       .select()
       .single();
 

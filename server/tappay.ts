@@ -5,12 +5,16 @@ import { eq } from "drizzle-orm";
 
 export const tappayRouter = Router();
 
-const TAPPAY_API_URL = "https://sandbox.tappaysdk.com/tpc/payment/pay-by-prime";
+const TAPPAY_API_URL = process.env.NODE_ENV === "production" 
+  ? "https://prod.tappaysdk.com/tpc/payment/pay-by-prime"
+  : "https://sandbox.tappaysdk.com/tpc/payment/pay-by-prime";
 
 const payByPrimeSchema = z.object({
   prime: z.string().min(1),
   organizationId: z.string().uuid(),
   planId: z.string().uuid(),
+  cycle: z.enum(["monthly", "annual"]).default("monthly"),
+  elderCount: z.number().int().positive().default(1),
   amount: z.number().positive(),
   cardholder: z.object({
     phoneNumber: z.string().min(1),
@@ -26,7 +30,7 @@ tappayRouter.post("/pay-by-prime", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "付款資料格式錯誤", errors: parsed.error });
     }
 
-    const { prime, organizationId, planId, amount, cardholder } = parsed.data;
+    const { prime, organizationId, planId, cycle, elderCount, amount, cardholder } = parsed.data;
 
     // 1. 確保環境變數已設定
     const partnerKey = process.env.TAPPAY_PARTNER_KEY;
@@ -70,19 +74,24 @@ tappayRouter.post("/pay-by-prime", requireAuth, async (req, res) => {
     const cardSecret = tappayData.card_secret; // 後續用來做定扣的 key
     const cardToken = tappayData.card_info.card_token; // 實際的 token
     
-    // 計算訂閱週期 (以月費為例，暫時 +30 天)
+    // 計算訂閱週期
     const startDate = new Date();
     const nextBillingDate = new Date();
-    nextBillingDate.setDate(nextBillingDate.getDate() + 30);
+    if (cycle === "annual") {
+      nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
+    } else {
+      nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
+    }
 
     const { data: subscription, error } = await supabaseAdmin
       .from("subscriptions")
       .insert({
         organization_id: organizationId,
         plan_id: planId,
-        billing_cycle: "monthly",
+        billing_cycle: cycle,
         status: "active",
         amount: amount,
+        elder_count: elderCount,
         start_date: startDate.toISOString().split('T')[0],
         end_date: nextBillingDate.toISOString().split('T')[0],
         next_billing_date: nextBillingDate.toISOString().split('T')[0],
