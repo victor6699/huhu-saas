@@ -185,13 +185,25 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
   // ── Subscriptions ──────────────────────────────────────────
   app.get("/api/subscriptions", requireAuth, async (_req, res) => {
-    const { data, error } = await supabaseAdmin
+    const { data: subs, error } = await supabaseAdmin
       .from("subscriptions")
-      .select("*, organizations(name), plans(name)")
+      .select("*")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ message: error.message });
-    res.json(data);
+
+    const { data: orgs } = await supabaseAdmin.from("organizations").select("id, name");
+    const { data: plans } = await supabaseAdmin.from("plans").select("id, name");
+    const orgMap = Object.fromEntries((orgs || []).map(o => [o.id, { name: o.name }]));
+    const planMap = Object.fromEntries((plans || []).map(p => [p.id, { name: p.name }]));
+
+    const enriched = (subs || []).map(s => ({
+      ...s,
+      organizations: orgMap[s.organization_id] || null,
+      plans: planMap[s.plan_id] || null
+    }));
+
+    res.json(enriched);
   });
 
   app.post("/api/subscriptions", requireAuth, async (req, res) => {
@@ -220,13 +232,22 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
   // ── Invoices ───────────────────────────────────────────────
   app.get("/api/invoices", requireAuth, async (_req, res) => {
-    const { data, error } = await supabaseAdmin
+    const { data: invs, error } = await supabaseAdmin
       .from("invoices")
-      .select("*, organizations(name)")
+      .select("*")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ message: error.message });
-    res.json(data);
+
+    const { data: orgs } = await supabaseAdmin.from("organizations").select("id, name");
+    const orgMap = Object.fromEntries((orgs || []).map(o => [o.id, { name: o.name }]));
+
+    const enriched = (invs || []).map(i => ({
+      ...i,
+      organizations: orgMap[i.organization_id] || null
+    }));
+
+    res.json(enriched);
   });
 
   app.post("/api/invoices", requireAuth, async (req, res) => {
@@ -245,13 +266,25 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
   // ── Payments ───────────────────────────────────────────────
   app.get("/api/payments", requireAuth, async (_req, res) => {
-    const { data, error } = await supabaseAdmin
+    const { data: pays, error } = await supabaseAdmin
       .from("payments")
-      .select("*, organizations(name), invoices(invoice_no)")
+      .select("*")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ message: error.message });
-    res.json(data);
+
+    const { data: orgs } = await supabaseAdmin.from("organizations").select("id, name");
+    const { data: invs } = await supabaseAdmin.from("invoices").select("id, invoice_no");
+    const orgMap = Object.fromEntries((orgs || []).map(o => [o.id, { name: o.name }]));
+    const invMap = Object.fromEntries((invs || []).map(i => [i.id, { invoice_no: i.invoice_no }]));
+
+    const enriched = (pays || []).map(p => ({
+      ...p,
+      organizations: orgMap[p.organization_id] || null,
+      invoices: invMap[p.invoice_id] || null
+    }));
+
+    res.json(enriched);
   });
 
   app.post("/api/payments", requireAuth, async (req, res) => {
@@ -270,13 +303,22 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
   // ── Service Records ────────────────────────────────────────
   app.get("/api/service-records", requireAuth, async (_req, res) => {
-    const { data, error } = await supabaseAdmin
+    const { data: recs, error } = await supabaseAdmin
       .from("service_records")
-      .select("*, organizations(name)")
+      .select("*")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ message: error.message });
-    res.json(data);
+
+    const { data: orgs } = await supabaseAdmin.from("organizations").select("id, name");
+    const orgMap = Object.fromEntries((orgs || []).map(o => [o.id, { name: o.name }]));
+
+    const enriched = (recs || []).map(r => ({
+      ...r,
+      organizations: orgMap[r.organization_id] || null
+    }));
+
+    res.json(enriched);
   });
 
   // ── Portal endpoints (for client organizations) ────────────
@@ -292,13 +334,22 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
     if (!membership) return res.json([]);
 
-    const { data, error } = await supabaseAdmin
+    const { data: subs, error } = await supabaseAdmin
       .from("subscriptions")
-      .select("*, plans(name, features)")
+      .select("*")
       .eq("organization_id", membership.organization_id);
 
     if (error) return res.status(500).json({ message: error.message });
-    res.json(data);
+
+    const { data: plans } = await supabaseAdmin.from("plans").select("id, name, features");
+    const planMap = Object.fromEntries((plans || []).map(p => [p.id, { name: p.name, features: p.features }]));
+
+    const enriched = (subs || []).map(s => ({
+      ...s,
+      plans: planMap[s.plan_id] || null
+    }));
+
+    res.json(enriched);
   });
 
   app.get("/api/portal/invoices", requireAuth, async (req, res) => {
