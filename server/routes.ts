@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { z } from "zod";
-import { extractUser, requireAuth, requireStaff, supabaseAdmin } from "./auth-middleware";
+import { extractUser, requireAuth, requireStaff, requireSuperAdmin, supabaseAdmin } from "./auth-middleware";
 import { pool } from "./db";
 
 // ═══════════════════════════════════════════════════════════════
@@ -122,7 +122,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // ── Organizations ──────────────────────────────────────────
-  app.get("/api/organizations", requireAuth, async (req, res) => {
+  app.get("/api/organizations", requireStaff, async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from("organizations")
       .select("*")
@@ -132,7 +132,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json(data);
   });
 
-  app.post("/api/organizations", requireAuth, async (req, res) => {
+  app.post("/api/organizations", requireStaff, async (req, res) => {
     const parsed = parsePayload(createOrganizationSchema, req.body);
     if (!parsed.ok) return res.status(400).json({ message: parsed.message });
 
@@ -161,7 +161,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // ── Organization Members ───────────────────────────────────
-  app.get("/api/organizations/:orgId/members", requireAuth, async (req, res) => {
+  app.get("/api/organizations/:orgId/members", requireStaff, async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from("organization_members")
       .select("*, person_profiles(full_name, email, avatar_url)")
@@ -192,7 +192,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // ── Subscriptions ──────────────────────────────────────────
-  app.get("/api/subscriptions", requireAuth, async (_req, res) => {
+  app.get("/api/subscriptions", requireStaff, async (_req, res) => {
     const { data: subs, error } = await supabaseAdmin
       .from("subscriptions")
       .select("*")
@@ -214,7 +214,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json(enriched);
   });
 
-  app.post("/api/subscriptions", requireAuth, async (req, res) => {
+  app.post("/api/subscriptions", requireStaff, async (req, res) => {
     const parsed = parsePayload(createSubscriptionPayloadSchema, req.body);
     if (!parsed.ok) return res.status(400).json({ message: parsed.message });
 
@@ -239,7 +239,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // ── Invoices ───────────────────────────────────────────────
-  app.get("/api/invoices", requireAuth, async (_req, res) => {
+  app.get("/api/invoices", requireStaff, async (_req, res) => {
     const { data: invs, error } = await supabaseAdmin
       .from("invoices")
       .select("*")
@@ -258,7 +258,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json(enriched);
   });
 
-  app.post("/api/invoices", requireAuth, async (req, res) => {
+  app.post("/api/invoices", requireStaff, async (req, res) => {
     const parsed = parsePayload(createInvoicePayloadSchema, req.body);
     if (!parsed.ok) return res.status(400).json({ message: parsed.message });
 
@@ -273,7 +273,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // ── Payments ───────────────────────────────────────────────
-  app.get("/api/payments", requireAuth, async (_req, res) => {
+  app.get("/api/payments", requireStaff, async (_req, res) => {
     const { data: pays, error } = await supabaseAdmin
       .from("payments")
       .select("*")
@@ -295,7 +295,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json(enriched);
   });
 
-  app.post("/api/payments", requireAuth, async (req, res) => {
+  app.post("/api/payments", requireStaff, async (req, res) => {
     const parsed = parsePayload(createPaymentPayloadSchema, req.body);
     if (!parsed.ok) return res.status(400).json({ message: parsed.message });
 
@@ -310,7 +310,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // ── Service Records ────────────────────────────────────────
-  app.get("/api/service-records", requireAuth, async (_req, res) => {
+  app.get("/api/service-records", requireStaff, async (_req, res) => {
     const { data: recs, error } = await supabaseAdmin
       .from("service_records")
       .select("*")
@@ -737,11 +737,18 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // ── Update Organization Status (activate / suspend) ───────
-  app.patch("/api/organizations/:id", requireAuth, async (req, res) => {
+  app.patch("/api/organizations/:id", requireStaff, async (req, res) => {
     const { id } = req.params;
+    // Whitelist allowed fields — prevent overwriting sensitive fields
+    const allowedFields = ["name", "legal_name", "tax_id", "address", "phone", "email", "status"];
+    const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+    for (const key of allowedFields) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+
     const { data, error } = await supabaseAdmin
       .from("organizations")
-      .update({ ...req.body, updated_at: new Date().toISOString() })
+      .update(updates)
       .eq("id", id)
       .select()
       .single();
@@ -751,7 +758,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // ── Staff Members (HuHu internal team) ────────────────────
-  app.get("/api/staff/members", requireAuth, async (_req, res) => {
+  app.get("/api/staff/members", requireStaff, async (_req, res) => {
     const staffRoles = ["admin", "superadmin", "sales", "finance", "support"];
     const { data, error } = await supabaseAdmin
       .from("organization_members")
@@ -763,7 +770,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json(data);
   });
 
-  app.post("/api/staff/members", requireAuth, async (req, res) => {
+  app.post("/api/staff/members", requireSuperAdmin, async (req, res) => {
     const { email, displayName, role, password } = req.body;
     if (!email || !displayName || !role)
       return res.status(400).json({ message: "email、displayName、role 為必填" });
@@ -825,7 +832,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
 
   // ── Update Staff Member (role / title) ─────────────────────
-  app.patch("/api/staff/members/:id", requireAuth, async (req, res) => {
+  app.patch("/api/staff/members/:id", requireSuperAdmin, async (req, res) => {
     const { id } = req.params;
     const { role_code, title } = req.body;
     const update: Record<string, any> = {};
@@ -890,7 +897,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   // ═══════════════════════════════════════════════════════════════
 
   // GET /api/crm/users — List all Supabase auth users with profiles & memberships
-  app.get("/api/crm/users", requireAuth, async (_req, res) => {
+  app.get("/api/crm/users", requireStaff, async (_req, res) => {
     try {
       // Fetch all auth users (paginated — up to 1000)
       const allUsers: any[] = [];
@@ -1002,7 +1009,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // PATCH /api/crm/users/:userId — Update user metadata (role, fullName, phone)
-  app.patch("/api/crm/users/:userId", requireAuth, async (req, res) => {
+  app.patch("/api/crm/users/:userId", requireSuperAdmin, async (req, res) => {
     const { userId } = req.params;
     const { role, fullName, phone } = req.body;
 
@@ -1031,7 +1038,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // POST /api/crm/batch-import — Batch create users from uploaded data
-  app.post("/api/crm/batch-import", requireAuth, async (req, res) => {
+  app.post("/api/crm/batch-import", requireSuperAdmin, async (req, res) => {
     const { rows } = req.body; // Array of { email, password?, fullName, phone?, role?, orgName?, orgType? }
     if (!Array.isArray(rows) || rows.length === 0) {
       return res.status(400).json({ message: "請提供至少一筆資料" });
@@ -1138,7 +1145,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
   });
 
   // ── Audit Logs ─────────────────────────────────────────────
-  app.get("/api/audit-logs", requireAuth, async (_req, res) => {
+  app.get("/api/audit-logs", requireStaff, async (_req, res) => {
     const { data, error } = await supabaseAdmin
       .from("audit_logs")
       .select("*")
