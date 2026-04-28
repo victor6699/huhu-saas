@@ -16,8 +16,7 @@ declare global {
       supabaseUser?: {
         id: string;         // auth.users UUID
         email?: string;
-        role?: string;       // from user metadata
-        verifiedRole?: string; // DB-verified role from organization_members
+        verifiedRole?: string; // DB-verified role from organization_members (tamper-proof)
       };
     }
   }
@@ -70,7 +69,7 @@ export async function extractUser(req: Request, _res: Response, next: NextFuncti
     req.supabaseUser = {
       id: user.id,
       email: user.email,
-      role: user.user_metadata?.role,
+      // M1 fix: no longer reading user_metadata.role (can be tampered by client SDK)
       verifiedRole,
     };
   } catch {
@@ -93,8 +92,8 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 /**
  * Middleware: Require admin/staff role.
- * Uses DB-verified role (organization_members) as primary check,
- * falls back to user_metadata.role for backward compatibility.
+ * Uses ONLY DB-verified role from organization_members (tamper-proof).
+ * M1 fix: Removed user_metadata fallback to prevent privilege escalation.
  * ⛔ Rejects non-staff users with 403.
  */
 export function requireStaff(req: Request, res: Response, next: NextFunction) {
@@ -102,15 +101,9 @@ export function requireStaff(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ message: "請先登入" });
   }
 
-  // Primary: DB-verified role (tamper-proof)
+  // Only DB-verified role — cannot be tampered by client SDK
   if (req.supabaseUser.verifiedRole &&
       (STAFF_ROLES as readonly string[]).includes(req.supabaseUser.verifiedRole)) {
-    return next();
-  }
-
-  // Fallback: user_metadata role (for backward compat during migration)
-  if (req.supabaseUser.role &&
-      (STAFF_ROLES as readonly string[]).includes(req.supabaseUser.role)) {
     return next();
   }
 
@@ -121,21 +114,16 @@ export function requireStaff(req: Request, res: Response, next: NextFunction) {
 /**
  * Middleware: Require superadmin role.
  * For highest-privilege operations: CRM role changes, batch imports, staff management.
- * Only checks DB-verified role (cannot be self-escalated).
+ * M1 fix: Only checks DB-verified role (cannot be self-escalated via user_metadata).
  */
 export function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.supabaseUser) {
     return res.status(401).json({ message: "請先登入" });
   }
 
-  // Only DB-verified superadmin — no metadata fallback for this level
+  // Only DB-verified superadmin — no metadata fallback at all
   if (req.supabaseUser.verifiedRole &&
       (SUPERADMIN_ROLES as readonly string[]).includes(req.supabaseUser.verifiedRole)) {
-    return next();
-  }
-
-  // Also allow metadata-based superadmin for backward compat
-  if (req.supabaseUser.role === "superadmin") {
     return next();
   }
 

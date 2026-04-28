@@ -1,8 +1,35 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { z } from "zod";
+import { randomUUID } from "crypto";
+import rateLimit from "express-rate-limit";
 import { extractUser, requireAuth, requireStaff, requireSuperAdmin, supabaseAdmin } from "./auth-middleware";
 import { pool } from "./db";
+
+// M2 fix: Rate limiting
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,                  // 100 requests per window per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "請求過於頻繁，請稍後再試" },
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,                   // 10 requests per window per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "請求過於頻繁，請稍後再試" },
+});
+
+/** M4 fix: Generate collision-resistant invoice number */
+function generateInvoiceNo(): string {
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, ""); // YYYYMMDD
+  const rand = randomUUID().slice(0, 6).toUpperCase(); // 6-char random
+  return `INV-${dateStr}-${rand}`;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Validation Schemas
@@ -70,6 +97,13 @@ import { tappayRouter } from "./tappay";
 
 export async function registerRoutes(_httpServer: Server, app: Express) {
   // Apply Supabase auth middleware globally
+  // M2 fix: Rate limiting on all API routes
+  app.use("/api", globalLimiter);
+  // Strict rate limit for auth-sensitive and batch endpoints
+  app.use("/api/crm/batch-import", strictLimiter);
+  app.use("/api/staff", strictLimiter);
+  app.use("/api/debug", strictLimiter);
+
   app.use(extractUser);
 
   // Mount TapPay routes
@@ -112,7 +146,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
       email: req.supabaseUser!.email,
       profile,
       memberships,
-      role: req.supabaseUser!.role,
+      role: req.supabaseUser!.verifiedRole || null,
     });
   });
 
@@ -264,7 +298,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
     const { data, error } = await supabaseAdmin
       .from("invoices")
-      .insert({ ...parsed.data, invoice_no: `INV-${Date.now()}` })
+      .insert({ ...parsed.data, invoice_no: generateInvoiceNo() })
       .select()
       .single();
 
@@ -848,47 +882,27 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
     res.json(data);
   });
 
-  // ── Debug / Health Check ────────────────────────────────────
-  app.get("/api/debug/health", async (req, res) => {
-    const envOk = !!process.env.SUPABASE_URL && !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY);
+  // ── Debug / Health Check (M3 fix: protected + sanitized) ────
+  app.get("/api/debug/health", requireStaff, async (_req, res) => {
     let dbOk = false;
-    let tables: string[] = [];
+    let tableCount = 0;
     try {
-      // Quick test: can supabaseAdmin reach DB?
-      const { data, error } = await supabaseAdmin.from("organizations").select("id").limit(1);
+      const { error } = await supabaseAdmin.from("organizations").select("id").limit(1);
       dbOk = !error;
-      if (error) tables.push(`organizations: ${error.message}`);
-      // Check critical tables exist
-      for (const t of ["person_profiles", "organization_members", "plans", "subscriptions", "invoices", "payments", "service_records"]) {
+      // Only report table connectivity, not env vars or user data
+      const tables = ["person_profiles", "organization_members", "plans", "subscriptions"];
+      for (const t of tables) {
         const { error: e } = await supabaseAdmin.from(t).select("id").limit(1);
-        tables.push(`${t}: ${e ? "ERROR - " + e.message : "OK"}`);
+        if (!e) tableCount++;
       }
-    } catch (e: any) {
-      tables.push(`connection_error: ${e.message}`);
-    }
-
-    // Check auth state if token provided
-    let authInfo = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith("Bearer ")) {
-      try {
-        const { data: { user }, error } = await supabaseAdmin.auth.getUser(authHeader.slice(7));
-        authInfo = error ? { error: error.message } : { id: user?.id, email: user?.email };
-      } catch (e: any) {
-        authInfo = { error: e.message };
-      }
-    }
+    } catch { /* connection error */ }
 
     res.json({
-      ok: envOk && dbOk,
-      env: {
-        SUPABASE_URL: process.env.SUPABASE_URL ? "set" : "MISSING",
-        SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? "set" : "MISSING",
-      },
+      ok: dbOk,
       db: dbOk,
-      tables,
-      auth: authInfo,
+      tablesReachable: `${tableCount}/4`,
       timestamp: new Date().toISOString(),
+      // M3 fix: No env var names, no user info, no sensitive data
     });
   });
 
@@ -1049,6 +1063,21 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
 
     const results: { email: string; status: string; message?: string }[] = [];
 
+    // H5 fix: Pre-cache all existing users ONCE (instead of calling listUsers per row)
+    const existingUsersMap = new Map<string, string>(); // email → user id
+    try {
+      let page = 1;
+      while (true) {
+        const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 100 });
+        if (error || !users || users.length === 0) break;
+        users.forEach((u: any) => { if (u.email) existingUsersMap.set(u.email.toLowerCase(), u.id); });
+        if (users.length < 100) break;
+        page++;
+      }
+    } catch (cacheErr: any) {
+      console.warn("[batch-import] Could not pre-cache users:", cacheErr.message);
+    }
+
     for (const row of rows) {
       try {
         const email = (row.email || "").trim().toLowerCase();
@@ -1062,13 +1091,12 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
         const role = (row.role || "user").trim();
         const password = (row.password || "").trim() || `Huhu${Math.random().toString(36).slice(-6)}!`;
 
-        // Check if user already exists
-        const { data: existing } = await supabaseAdmin.auth.admin.listUsers();
-        const existingUser = existing?.users?.find((u: any) => u.email === email);
+        // Check from pre-cached map (no extra API call)
+        const existingUserId = existingUsersMap.get(email);
 
         let userId: string;
-        if (existingUser) {
-          userId = existingUser.id;
+        if (existingUserId) {
+          userId = existingUserId;
           results.push({ email, status: "skipped", message: "帳號已存在" });
         } else {
           // Create auth user
@@ -1083,6 +1111,7 @@ export async function registerRoutes(_httpServer: Server, app: Express) {
             continue;
           }
           userId = authData.user!.id;
+          existingUsersMap.set(email, userId); // Update cache to prevent duplicates within batch
 
           // Create person_profile
           await supabaseAdmin.from("person_profiles").insert({

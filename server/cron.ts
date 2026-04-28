@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import crypto from "crypto";
 import { supabaseAdmin } from "./auth-middleware";
 
 // Respect TAPPAY_ENV: default sandbox unless explicitly set to production
@@ -79,7 +80,7 @@ export function startCronJobs() {
           .insert({
             organization_id: sub.organization_id,
             subscription_id: sub.id,
-            invoice_no: `INV-${Date.now()}`,
+            invoice_no: `INV-${today.replace(/-/g, "")}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`,
             issue_date: today,
             due_date: today,
             period_start: periodStart,
